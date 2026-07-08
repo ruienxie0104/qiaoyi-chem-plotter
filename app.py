@@ -103,7 +103,7 @@ for cat, items in categories.items():
                     )
                     y_max_a09 = st.number_input(
                         "Y軸上限（0=預設）", value=0.0, step=0.1,
-                        key=f"ymax_{key_prefix}"
+                        key=f"ymax_a09_{key_prefix}"
                     )
                     if y_max_a09 > 0:
                         params["y_max"] = y_max_a09
@@ -121,14 +121,14 @@ for cat, items in categories.items():
                 if plot_id == "A-09":
                     y_tick_a09 = st.number_input(
                         "Y軸刻度間距（0=預設）", value=0.0, step=0.1,
-                        key=f"ytick_{key_prefix}"
+                        key=f"ytick_a09_{key_prefix}"
                     )
                     if y_tick_a09 > 0:
                         params["y_tick"] = y_tick_a09
                 if plot_id == "B-06":
                     y_tick_b06 = st.number_input(
                         "Y軸刻度間距（0=預設）", value=0.0, step=0.1,
-                        key=f"ytick_{key_prefix}"
+                        key=f"ytick_b06_{key_prefix}"
                     )
                     if y_tick_b06 > 0:
                         params["y_tick"] = y_tick_b06
@@ -152,7 +152,7 @@ for cat, items in categories.items():
                     )
                     y_max_b06 = st.number_input(
                         "Y軸上限（0=預設）", value=0.0, step=0.1,
-                        key=f"ymax_{key_prefix}"
+                        key=f"ymax_b06_{key_prefix}"
                     )
                     if y_max_b06 > 0:
                         params["y_max"] = y_max_b06
