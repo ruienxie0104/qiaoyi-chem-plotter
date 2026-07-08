@@ -1072,8 +1072,35 @@ def plot_b07_timeseries(dfs, params):
     df[sp_col] = pd.to_numeric(df[sp_col], errors="coerce")
     df = df.dropna(subset=[time_col, sp_col]).copy()
 
+    # 人為源篩選：依月份計算判定物種 mean±3σ，超出的整列排除
+    remove_anthro = params.get("remove_anthro", False)
+    ANTHRO_SPECIES = ["1,3-butadiene", "toluene", "benzene", "CO", "NMHC"]
+    if remove_anthro:
+        df["_month"] = df[time_col].dt.to_period("M").astype(str)
+        for sp in ANTHRO_SPECIES:
+            sp_norm = _norm_colname(sp)
+            col = None
+            for c in df.columns:
+                if _norm_colname(c) == sp_norm:
+                    col = c
+                    break
+            if col is None:
+                continue
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+            for mon, grp in df.groupby("_month"):
+                mu = grp[col].mean()
+                sigma = grp[col].std()
+                if pd.isna(mu) or pd.isna(sigma) or sigma == 0:
+                    continue
+                lower = mu - 3 * sigma
+                upper = mu + 3 * sigma
+                mask = (df["_month"] == mon) & ((df[col] < lower) | (df[col] > upper))
+                df = df[~mask].copy()
+        df = df.drop(columns=["_month"])
+        df = df.dropna(subset=[time_col, sp_col]).copy()
+
     if df.empty:
-        raise ValueError("沒有有效的數據")
+        raise ValueError("沒有有效的數據（人為源篩選後可能全部被排除）")
 
     # Y軸設定
     ylabel = YLABEL_DICT.get(species, species)

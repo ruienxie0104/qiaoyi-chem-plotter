@@ -166,6 +166,13 @@ for cat, items in categories.items():
                     )
                     if y_max_b06 > 0:
                         params["y_max"] = y_max_b06
+                # B-07: 人為源篩選
+                if plot_id == "B-07":
+                    params["remove_anthro"] = st.checkbox(
+                        "排除人為源異常值（3σ 篩選）",
+                        value=False,
+                        help="依月份計算 1,3-butadiene、toluene、benzene、CO、NMHC 的平均值±3σ，超出的整列排除"
+                    )
                 # B-01: 圖表類型選擇 + 工作表選擇
                 if plot_id == "B-01":
                     plot_type_options = ["自動判斷", "線性 (Linearity R²)", "回收率 (Recovery %)", "%RSD"]
