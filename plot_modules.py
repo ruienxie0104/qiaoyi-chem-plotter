@@ -1072,31 +1072,48 @@ def plot_b07_timeseries(dfs, params):
     df[sp_col] = pd.to_numeric(df[sp_col], errors="coerce")
     df = df.dropna(subset=[time_col, sp_col]).copy()
 
-    # 人為源篩選：依月份計算判定物種 mean+3σ，超過門檻的整列排除
+    # 人為源篩選：用 5 種人為指標判定，超門檻的時間點把 7 種生物源物種整列刪除
     remove_anthro = params.get("remove_anthro", False)
-    ANTHRO_SPECIES = ["1,3-butadiene", "toluene", "benzene", "CO", "NMHC"]
+    ANTHRO_INDICATORS = ["1,3-butadiene", "toluene", "benzene", "CO", "NMHC"]
+    BIOGENIC_TARGETS = ["MVK", "MEK", "MACR", "total_monoterpene", "isoprene", "formaldehyde", "acetaldehyde"]
     if remove_anthro:
         df["_month"] = df[time_col].dt.to_period("M").astype(str)
-        for sp in ANTHRO_SPECIES:
+        # 找出判定指標欄位（檔案裡有的才算）
+        indicator_cols = []
+        for sp in ANTHRO_INDICATORS:
             sp_norm = _norm_colname(sp)
-            col = None
             for c in df.columns:
                 if _norm_colname(c) == sp_norm:
-                    col = c
+                    df[c] = pd.to_numeric(df[c], errors="coerce")
+                    indicator_cols.append(c)
                     break
-            if col is None:
-                continue
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-            for mon, grp in df.groupby("_month"):
+        # 找出要刪除的生物源欄位
+        biogenic_cols = []
+        for sp in BIOGENIC_TARGETS:
+            sp_norm = _norm_colname(sp)
+            for c in df.columns:
+                if _norm_colname(c) == sp_norm:
+                    biogenic_cols.append(c)
+                    break
+        # 依月份計算每個指標的 mean+3σ，任一超過就把該時間的七種生物源數據設為 NaN
+        for mon, grp in df.groupby("_month"):
+            bad_mask = pd.Series(False, index=grp.index)
+            for col in indicator_cols:
                 mu = grp[col].mean()
                 sigma = grp[col].std()
                 if pd.isna(mu) or pd.isna(sigma) or sigma == 0:
                     continue
                 threshold = mu + 3 * sigma
-                mask = (df["_month"] == mon) & (df[col] > threshold)
-                df = df[~mask].copy()
+                bad_mask = bad_mask | (grp[col] > threshold)
+            # 把被判為異常的時間點的生物源欄位設為 NaN（不刪整列，只清生物源數據）
+            bad_idx = grp.index[bad_mask]
+            df.loc[bad_idx, biogenic_cols] = np.nan
         df = df.drop(columns=["_month"])
-        df = df.dropna(subset=[time_col, sp_col]).copy()
+        # 重新以目標物種篩選（因為目標物種可能被清成 NaN）
+        if sp_col in biogenic_cols:
+            df = df.dropna(subset=[time_col, sp_col]).copy()
+        else:
+            df = df.dropna(subset=[time_col]).copy()
 
     if df.empty:
         raise ValueError("沒有有效的數據（人為源篩選後可能全部被排除）")
