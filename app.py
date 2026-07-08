@@ -122,7 +122,7 @@ for cat, items in categories.items():
                         "物種", species_options, index=13,
                         key=f"species_{key_prefix}"
                     )
-                # B-01: 圖表類型選擇
+                # B-01: 圖表類型選擇 + 工作表選擇
                 if plot_id == "B-01":
                     plot_type_options = ["自動判斷", "線性 (Linearity R²)", "回收率 (Recovery %)", "%RSD"]
                     selected_type = st.selectbox(
@@ -138,6 +138,23 @@ for cat, items in categories.items():
                         "%RSD": "%RSD"
                     }
                     params["plot_type"] = type_map.get(selected_type, "")
+                    
+                    # 工作表選擇
+                    if uploaded_files:
+                        try:
+                            import openpyxl
+                            wb = openpyxl.load_workbook(uploaded_files[0].getvalue(), read_only=True)
+                            sheet_names = wb.sheetnames
+                            wb.close()
+                            if len(sheet_names) > 1:
+                                selected_sheet = st.selectbox(
+                                    "選擇工作表",
+                                    sheet_names,
+                                    key=f"sheet_{key_prefix}"
+                                )
+                                params["sheet_name"] = selected_sheet
+                        except:
+                            pass
 
             # --- 生成按鈕 ---
             btn_clicked = st.button(
@@ -168,7 +185,12 @@ for cat, items in categories.items():
                                             f.seek(0)
                                             df = pd.read_csv(f, encoding="cp950")
                                 else:
-                                    df = pd.read_excel(f, engine="openpyxl")
+                                    # 如果有指定工作表，讀取該工作表
+                                    sheet = params.get("sheet_name", None)
+                                    if sheet:
+                                        df = pd.read_excel(f, sheet_name=sheet, engine="openpyxl")
+                                    else:
+                                        df = pd.read_excel(f, engine="openpyxl")
                                 dfs.append(df)
 
                             # 執行繪圖
