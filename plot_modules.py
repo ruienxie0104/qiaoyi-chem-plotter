@@ -988,7 +988,7 @@ def plot_b06_diurnal(dfs, params):
     return fig
 
 register("B-06", "季節 Diurnal 比較圖", "統計",
-        "各季節小時均值±標準差比較圖，需指定物種名稱，可上傳兩個檔案合併", plot_b06_diurnal, needs_files=2)
+        "各季節小時均值±標準差比較圖，需指定物種名稱，可上傳1-2個檔案", plot_b06_diurnal, needs_files=1)
 
 
 # ============================================================

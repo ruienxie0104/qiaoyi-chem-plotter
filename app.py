@@ -64,6 +64,16 @@ for cat, items in categories.items():
                     if f is not None:
                         uploaded_files.append(f)
 
+            # B-06: 可選第二個檔案
+            if plot_id == "B-06":
+                f2 = st.file_uploader(
+                    "檔案 2（可選）",
+                    type=["xlsx", "xls", "csv"],
+                    key=f"file2_{key_prefix}"
+                )
+                if f2 is not None:
+                    uploaded_files.append(f2)
+
             # --- 參數區 ---
             params = {}
             param_cols = st.columns([1, 1, 1])
