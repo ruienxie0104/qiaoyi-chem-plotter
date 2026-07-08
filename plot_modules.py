@@ -914,7 +914,18 @@ def plot_b06_diurnal(dfs, params):
         "NO": (0, 4, 1), "NO2": (0, 12, 3), "NMHC": (0, 0.06, 0.02)
     }
 
-    df = pd.concat([d.copy() for d in dfs], ignore_index=True)
+    # 處理 SIFT-MS 格式：第一行是標題，第二行才是欄位名
+    raw_df = pd.concat([d.copy() for d in dfs], ignore_index=True)
+    # 檢查是否為 SIFT-MS 格式（第一欄叫 'Analyte concentrations (ppb)' 之類）
+    if any("analyte" in str(c).lower() for c in raw_df.columns):
+        # 用第一行當 header
+        new_header = raw_df.iloc[0].tolist()
+        df = raw_df[1:].copy()
+        df.columns = new_header
+        df = df.reset_index(drop=True)
+    else:
+        df = raw_df
+
     # 找時間欄位
     time_col = None
     for c in df.columns:
@@ -923,7 +934,7 @@ def plot_b06_diurnal(dfs, params):
             time_col = c
             break
     if time_col is None:
-        raise ValueError("找不到時間欄位")
+        raise ValueError(f"找不到時間欄位。現有欄位：{list(df.columns)}")
 
     df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
     df = df.dropna(subset=[time_col]).copy()
