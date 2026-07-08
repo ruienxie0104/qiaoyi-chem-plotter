@@ -456,25 +456,26 @@ def plot_b01_calibration_boxplot(dfs, params):
 
     # 自動判斷圖類型
     sheet_name = params.get("sheet_name", "")
-    plot_type = None
-    if "線性" in sheet_name:
-        plot_type = "線性"
-    elif "回收" in sheet_name:
-        plot_type = "回收率"
-    elif "RSD" in sheet_name or "rsd" in sheet_name:
-        plot_type = "%RSD"
-    else:
-        # 嘗試從欄位判斷
-        cols_str = " ".join(str(c) for c in df.columns)
-        if "Linearity" in cols_str or "R²" in cols_str or "R2" in cols_str:
+    plot_type = params.get("plot_type", "")  # 可從 UI 下拉選單指定
+    if not plot_type:
+        if "線性" in sheet_name:
             plot_type = "線性"
-        elif "10 ppb" in cols_str or "20 ppb" in cols_str:
+        elif "回收" in sheet_name:
             plot_type = "回收率"
-        elif "RSD" in cols_str:
+        elif "RSD" in sheet_name or "rsd" in sheet_name:
             plot_type = "%RSD"
+        else:
+            # 嘗試從欄位判斷（更寬鬆的匹配）
+            cols_norm = [_norm_colname(str(c)) for c in df.columns]
+            if any("linearity" in c or "r2" in c or "r²" in c.lower() for c in cols_norm):
+                plot_type = "線性"
+            elif any("10ppb" in c or "15ppb" in c or "20ppb" in c or "25ppb" in c or "30ppb" in c for c in cols_norm):
+                plot_type = "回收率"
+            elif any("rsd" in c for c in cols_norm):
+                plot_type = "%RSD"
 
     if plot_type is None:
-        raise ValueError("無法判斷圖表類型，請在參數中指定 sheet_name")
+        raise ValueError("無法判斷圖表類型，請在參數中選擇圖表類型")
 
     setting = PLOT_SETTINGS[plot_type]
 

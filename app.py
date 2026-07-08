@@ -122,13 +122,22 @@ for cat, items in categories.items():
                         "物種", species_options, index=13,
                         key=f"species_{key_prefix}"
                     )
-                # B-01: sheet 名稱
+                # B-01: 圖表類型選擇
                 if plot_id == "B-01":
-                    params["sheet_name"] = st.text_input(
-                        "工作表名稱（含「線性」「回收」或「RSD」）",
-                        value="",
-                        key=f"sheet_{key_prefix}"
+                    plot_type_options = ["自動判斷", "線性 (Linearity R²)", "回收率 (Recovery %)", "%RSD"]
+                    selected_type = st.selectbox(
+                        "圖表類型",
+                        plot_type_options,
+                        index=0,
+                        key=f"ptype_{key_prefix}"
                     )
+                    type_map = {
+                        "自動判斷": "",
+                        "線性 (Linearity R²)": "線性",
+                        "回收率 (Recovery %)": "回收率",
+                        "%RSD": "%RSD"
+                    }
+                    params["plot_type"] = type_map.get(selected_type, "")
 
             # --- 生成按鈕 ---
             btn_clicked = st.button(
