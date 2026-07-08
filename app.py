@@ -186,12 +186,26 @@ for cat, items in categories.items():
                                             f.seek(0)
                                             df = pd.read_csv(f, encoding="cp950")
                                 else:
-                                    # 如果有指定工作表，讀取該工作表
+                                    # Excel：先嘗試指定 sheet，失敗再試預設
+                                    file_bytes = f.getvalue()
                                     sheet = params.get("sheet_name", None)
-                                    if sheet:
-                                        df = pd.read_excel(f, sheet_name=sheet, engine="openpyxl")
-                                    else:
-                                        df = pd.read_excel(f, engine="openpyxl")
+                                    try:
+                                        if sheet:
+                                            df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet, engine="openpyxl")
+                                        else:
+                                            df = pd.read_excel(io.BytesIO(file_bytes), engine="openpyxl")
+                                    except Exception as excel_err:
+                                        # 可能是非標準 Excel，試試 xlrd 或 csv
+                                        try:
+                                            df = pd.read_excel(io.BytesIO(file_bytes), engine="xlrd")
+                                        except Exception:
+                                            try:
+                                                df = pd.read_csv(io.BytesIO(file_bytes), encoding="utf-8", sep=None, engine="python")
+                                            except Exception:
+                                                try:
+                                                    df = pd.read_csv(io.BytesIO(file_bytes), encoding="big5", sep=None, engine="python")
+                                                except Exception:
+                                                    raise ValueError(f"無法讀取檔案 {f.name}：{excel_err}")
                                 dfs.append(df)
 
                             # 執行繪圖
