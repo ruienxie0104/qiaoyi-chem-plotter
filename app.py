@@ -163,7 +163,8 @@ for cat, items in categories.items():
                                 dfs.append(df)
 
                             # 執行繪圖
-                            result = item["func"](dfs, params)
+                            plot_info = get_plot_by_id(plot_id)
+                            result = plot_info["func"](dfs, params)
 
                             if isinstance(result, tuple):
                                 fig, excel_bytes = result
