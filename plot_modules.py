@@ -1110,7 +1110,23 @@ def plot_b07_timeseries(dfs, params):
     fig, ax = plt.subplots(figsize=(16, 9), dpi=300)
     fig.subplots_adjust(left=0.08, right=0.98, bottom=0.22, top=0.92)
 
-    ax.plot(df[time_col], df[sp_col], marker="o", linestyle="-",
+    # 缺值不連線：把 NaN 處插入 NaN 來中斷線條
+    plot_df = df[[time_col, sp_col]].copy()
+    plot_df = plot_df.sort_values(time_col).reset_index(drop=True)
+    # 偵測大間隔（超過中位數間隔的 3 倍視為缺值）
+    if len(plot_df) > 2:
+        diffs = plot_df[time_col].diff().dt.total_seconds().dropna()
+        median_gap = diffs.median()
+        if median_gap and median_gap > 0:
+            gap_threshold = median_gap * 3
+            for i in range(1, len(plot_df)):
+                gap = (plot_df[time_col].iloc[i] - plot_df[time_col].iloc[i-1]).total_seconds()
+                if gap > gap_threshold:
+                    # 在缺值處插入 NaN 行
+                    nan_row = pd.DataFrame({time_col: pd.NaT, sp_col: np.nan}, index=[i - 0.5])
+                    plot_df = pd.concat([plot_df.iloc[:i], nan_row, plot_df.iloc[i:]]).reset_index(drop=True)
+
+    ax.plot(plot_df[time_col], plot_df[sp_col], marker="o", linestyle="-",
             markersize=MARKER_SIZE, linewidth=LINE_WIDTH, color="#1F77B4",
             alpha=0.8, zorder=4)
 
