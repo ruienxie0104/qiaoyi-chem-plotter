@@ -872,26 +872,28 @@ def plot_b06_diurnal(dfs, params):
     MARKER_SIZE = 7
     matplotlib.rcParams["font.size"] = BASE
 
-    SEASON_ORDER = ["Spring 2025", "Summer 2025", "Autumn 2025", "Winter 2025-2026", "Spring 2026"]
+    SEASON_ORDER = ["Spring 2025", "Summer 2025", "Autumn 2025", "Winter 2025-2026", "Spring 2026", "Summer 2026"]
     SEASON_COLORS = {
         "Spring 2025": "#AFCBE3", "Summer 2025": "#FF7F0E",
-        "Autumn 2025": "#2CA02C", "Winter 2025-2026": "#D62728", "Spring 2026": "#1F77B4"
+        "Autumn 2025": "#2CA02C", "Winter 2025-2026": "#D62728", "Spring 2026": "#1F77B4",
+        "Summer 2026": "#9467BD"
     }
     SEASON_MARKERS = {
         "Spring 2025": "o", "Summer 2025": "s", "Autumn 2025": "^",
-        "Winter 2025-2026": "D", "Spring 2026": "P"
+        "Winter 2025-2026": "D", "Spring 2026": "P", "Summer 2026": "X"
     }
 
     def assign_season(dt):
         y, m = dt.year, dt.month
         if y == 2025:
-            if m == 5: return "Spring 2025"
+            if m in [3,4,5]: return "Spring 2025"
             elif m in [6,7,8]: return "Summer 2025"
             elif m in [9,10,11]: return "Autumn 2025"
-            elif m == 12: return "Winter 2025-2026"
+            elif m in [12]: return "Winter 2025-2026"
         elif y == 2026:
             if m in [1,2]: return "Winter 2025-2026"
             elif m in [3,4,5]: return "Spring 2026"
+            elif m in [6,7,8]: return "Summer 2026"
         return np.nan
 
     YLABEL_DICT = {
