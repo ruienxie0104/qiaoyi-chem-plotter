@@ -1072,7 +1072,7 @@ def plot_b07_timeseries(dfs, params):
     df[sp_col] = pd.to_numeric(df[sp_col], errors="coerce")
     df = df.dropna(subset=[time_col, sp_col]).copy()
 
-    # 人為源篩選：依月份計算判定物種 mean±3σ，超出的整列排除
+    # 人為源篩選：依月份計算判定物種 mean+3σ，超過門檻的整列排除
     remove_anthro = params.get("remove_anthro", False)
     ANTHRO_SPECIES = ["1,3-butadiene", "toluene", "benzene", "CO", "NMHC"]
     if remove_anthro:
@@ -1092,9 +1092,8 @@ def plot_b07_timeseries(dfs, params):
                 sigma = grp[col].std()
                 if pd.isna(mu) or pd.isna(sigma) or sigma == 0:
                     continue
-                lower = mu - 3 * sigma
-                upper = mu + 3 * sigma
-                mask = (df["_month"] == mon) & ((df[col] < lower) | (df[col] > upper))
+                threshold = mu + 3 * sigma
+                mask = (df["_month"] == mon) & (df[col] > threshold)
                 df = df[~mask].copy()
         df = df.drop(columns=["_month"])
         df = df.dropna(subset=[time_col, sp_col]).copy()
