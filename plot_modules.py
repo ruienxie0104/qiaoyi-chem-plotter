@@ -1072,20 +1072,12 @@ def plot_b07_timeseries(dfs, params):
     df[sp_col] = pd.to_numeric(df[sp_col], errors="coerce")
     df = df.dropna(subset=[time_col, sp_col]).copy()
 
-    # 異常值篩選：依月份計算判定物種 mean±3σ，超出的整列排除
+    # 人為源篩選：依月份計算判定物種 mean±3σ，超出的整列排除
     remove_anthro = params.get("remove_anthro", False)
     ANTHRO_SPECIES = ["1,3-butadiene", "toluene", "benzene", "CO", "NMHC"]
-    remove_biogenic = params.get("remove_biogenic", False)
-    BIOGENIC_SPECIES = ["MVK", "MEK", "MACR", "total_monoterpene", "isoprene", "formaldehyde", "acetaldehyde"]
-
-    if remove_anthro or remove_biogenic:
+    if remove_anthro:
         df["_month"] = df[time_col].dt.to_period("M").astype(str)
-        filter_species = []
-        if remove_anthro:
-            filter_species += ANTHRO_SPECIES
-        if remove_biogenic:
-            filter_species += BIOGENIC_SPECIES
-        for sp in filter_species:
+        for sp in ANTHRO_SPECIES:
             sp_norm = _norm_colname(sp)
             col = None
             for c in df.columns:
@@ -1108,7 +1100,7 @@ def plot_b07_timeseries(dfs, params):
         df = df.dropna(subset=[time_col, sp_col]).copy()
 
     if df.empty:
-        raise ValueError("沒有有效的數據（篩選後可能全部被排除）")
+        raise ValueError("沒有有效的數據（人為源篩選後可能全部被排除）")
 
     # Y軸設定
     ylabel = YLABEL_DICT.get(species, species)
