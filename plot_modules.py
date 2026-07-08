@@ -1003,6 +1003,116 @@ def plot_b06_diurnal(dfs, params):
 register("B-06", "季節 Diurnal 比較圖", "統計",
         "各季節小時均值±標準差比較圖，需指定物種名稱，可上傳1-2個檔案", plot_b06_diurnal, needs_files=1)
 
+# --- B-07: 時間序列趨勢圖（均值±標準差）---
+def plot_b07_timeseries(dfs, params):
+    """時間序列趨勢圖 — X軸是完整日期時間，Y軸是濃度"""
+    import matplotlib.dates as mdates
+
+    SCALE = params.get("scale", 1.8)
+    species = params.get("species", "isoprene")
+
+    matplotlib.rcParams["font.family"] = ["Microsoft JhengHei", "DejaVu Sans", "Arial Unicode MS"]
+    matplotlib.rcParams["axes.unicode_minus"] = False
+    BASE = 18 * SCALE
+    LABEL_FS = 20 * SCALE
+    TICK_FS = 15 * SCALE
+    LINE_WIDTH = 1.5
+    MARKER_SIZE = 4
+    matplotlib.rcParams["font.size"] = BASE
+
+    YLABEL_DICT = {
+        "1,3-butadiene": "1,3-Butadiene (ppbv)", "acetaldehyde": "Acetaldehyde (ppbv)",
+        "benzene": "Benzene (ppbv)", "formaldehyde": "Formaldehyde (ppbv)",
+        "isoprene": "Isoprene (ppbv)", "MACR": "MACR (ppbv)", "MEK": "MEK (ppbv)",
+        "MVK": "MVK (ppbv)", "toluene": "Toluene (ppbv)", "total_monoterpene": "Monoterpene (ppbv)",
+        "PM2.5": r"$PM_{2.5}$ (μg/m³)", "PM10": r"$PM_{10}$ (μg/m³)",
+        "CO": "CO (ppmv)", "O3": r"$O_{3}$ (ppbv)", "NO": "NO (ppbv)",
+        "NO2": r"$NO_{2}$ (ppbv)", "NMHC": "NMHC (ppmC)"
+    }
+
+    # 處理 SIFT-MS 格式
+    raw_df = pd.concat([d.copy() for d in dfs], ignore_index=True)
+    if any("analyte" in str(c).lower() for c in raw_df.columns):
+        new_header = raw_df.iloc[0].tolist()
+        df = raw_df[1:].copy()
+        df.columns = new_header
+        df = df.reset_index(drop=True)
+    else:
+        df = raw_df
+
+    # 找時間欄位
+    time_col = None
+    for c in df.columns:
+        cl = str(c).lower()
+        if "time" in cl or "date" in cl or "時間" in str(c) or "日期" in str(c):
+            time_col = c
+            break
+    if time_col is None:
+        raise ValueError(f"找不到時間欄位。現有欄位：{list(df.columns)}")
+
+    df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+    df = df.dropna(subset=[time_col]).copy()
+    df = df.sort_values(time_col).reset_index(drop=True)
+
+    # 找物種欄位
+    target_norm = _norm_colname(species)
+    sp_col = None
+    for c in df.columns:
+        if _norm_colname(c) == target_norm:
+            sp_col = c
+            break
+    if sp_col is None:
+        for c in df.columns:
+            if target_norm in _norm_colname(c):
+                sp_col = c
+                break
+    if sp_col is None:
+        raise ValueError(f"找不到物種欄位：{species}。現有欄位：{list(df.columns)}")
+
+    df[sp_col] = pd.to_numeric(df[sp_col], errors="coerce")
+    df = df.dropna(subset=[time_col, sp_col]).copy()
+
+    if df.empty:
+        raise ValueError("沒有有效的數據")
+
+    # Y軸設定
+    ylabel = YLABEL_DICT.get(species, species)
+    y_max_custom = params.get("y_max", 0)
+    y_tick_custom = params.get("y_tick", 0)
+
+    fig, ax = plt.subplots(figsize=(16, 9), dpi=300)
+    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.22, top=0.92)
+
+    ax.plot(df[time_col], df[sp_col], marker="o", linestyle="-",
+            markersize=MARKER_SIZE, linewidth=LINE_WIDTH, color="#1F77B4",
+            alpha=0.8, zorder=4)
+
+    ax.set_xlabel("Date & Time", fontsize=LABEL_FS)
+    ax.set_ylabel(ylabel, fontsize=LABEL_FS, fontweight="bold")
+
+    # Y軸
+    if y_max_custom and y_max_custom > 0:
+        ax.set_ylim(0, y_max_custom)
+        if y_tick_custom and y_tick_custom > 0:
+            ax.set_yticks(np.arange(0, y_max_custom + y_tick_custom, y_tick_custom))
+    else:
+        ymax_data = df[sp_col].max()
+        ax.set_ylim(0, ymax_data * 1.15)
+
+    # X軸格式
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d\n%H:%M"))
+    ax.tick_params(axis="x", labelsize=TICK_FS, rotation=0)
+    ax.tick_params(axis="y", labelsize=TICK_FS)
+    ax.grid(True, color="gray", alpha=0.25)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    return fig
+
+register("B-07", "時間序列趨勢圖（均值±標準差）", "統計",
+        "X軸為完整日期時間的濃度趨勢圖，需指定物種名稱，可上傳1-2個檔案", plot_b07_timeseries, needs_files=1)
+
 
 # ============================================================
 # 取得所有片段的 metadata（不含 func）

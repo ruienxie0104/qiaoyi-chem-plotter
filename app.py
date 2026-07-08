@@ -64,8 +64,8 @@ for cat, items in categories.items():
                     if f is not None:
                         uploaded_files.append(f)
 
-            # B-06: 可選第二個檔案
-            if plot_id == "B-06":
+            # B-06/B-07: 可選第二個檔案
+            if plot_id in ("B-06", "B-07"):
                 f2 = st.file_uploader(
                     "檔案 2（可選）",
                     type=["xlsx", "xls", "csv"],
@@ -135,7 +135,7 @@ for cat, items in categories.items():
                     )
                     if y_tick_a09 > 0:
                         params["y_tick"] = y_tick_a09
-                if plot_id == "B-06":
+                if plot_id in ("B-06", "B-07"):
                     y_tick_b06 = st.number_input(
                         "Y軸刻度間距（0=預設）", value=0.0, step=0.1,
                         key=f"ytick_b06_{key_prefix}"
@@ -149,15 +149,15 @@ for cat, items in categories.items():
                 )
                 params["scale"] = scale
             with param_cols2[2]:
-                # B-06: 物種選擇 + Y軸
-                if plot_id == "B-06":
+                # B-06/B-07: 物種選擇 + Y軸
+                if plot_id in ("B-06", "B-07"):
                     species_options = [
                         "1,3-butadiene", "acetaldehyde", "benzene", "formaldehyde",
                         "isoprene", "MACR", "MEK", "MVK", "toluene", "total_monoterpene",
                         "PM2.5", "PM10", "CO", "O3", "NO", "NO2", "NMHC"
                     ]
                     params["species"] = st.selectbox(
-                        "物種", species_options, index=13,
+                        "物種", species_options, index=4,
                         key=f"species_{key_prefix}"
                     )
                     y_max_b06 = st.number_input(
