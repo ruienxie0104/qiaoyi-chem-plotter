@@ -142,10 +142,11 @@ for cat, items in categories.items():
                     # 工作表選擇
                     if uploaded_files:
                         try:
-                            import openpyxl
-                            wb = openpyxl.load_workbook(uploaded_files[0].getvalue(), read_only=True)
-                            sheet_names = wb.sheetnames
-                            wb.close()
+                            import io as _io
+                            file_bytes = uploaded_files[0].getvalue()
+                            xl = pd.ExcelFile(_io.BytesIO(file_bytes), engine="openpyxl")
+                            sheet_names = xl.sheet_names
+                            xl.close()
                             if len(sheet_names) > 1:
                                 selected_sheet = st.selectbox(
                                     "選擇工作表",
@@ -153,7 +154,7 @@ for cat, items in categories.items():
                                     key=f"sheet_{key_prefix}"
                                 )
                                 params["sheet_name"] = selected_sheet
-                        except:
+                        except Exception:
                             pass
 
             # --- 生成按鈕 ---
