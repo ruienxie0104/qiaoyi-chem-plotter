@@ -1077,51 +1077,6 @@ def plot_b07_timeseries(dfs, params):
     ANTHRO_INDICATORS = ["1,3-butadiene", "toluene", "benzene", "CO", "NMHC"]
     BIOGENIC_TARGETS = ["MVK", "MEK", "MACR", "total_monoterpene", "isoprene", "formaldehyde", "acetaldehyde"]
     if remove_anthro:
-        # 從額外上傳的檔案讀取 CO 和 NMHC
-        import io
-        for extra_key, sp_name in [("file_co", "CO"), ("file_nmhc", "NMHC")]:
-            f_extra = params.get(extra_key)
-            if f_extra is not None:
-                try:
-                    extra_bytes = f_extra.read()
-                    f_extra.seek(0)
-                    extra_df = None
-                    try:
-                        extra_df = pd.read_excel(io.BytesIO(extra_bytes), engine="openpyxl")
-                    except Exception:
-                        for enc in ["utf-8", "big5", "cp950"]:
-                            try:
-                                extra_df = pd.read_csv(io.BytesIO(extra_bytes), encoding=enc)
-                                break
-                            except Exception:
-                                continue
-                    if extra_df is None:
-                        continue
-                    # 找時間欄位
-                    extra_time = None
-                    for c in extra_df.columns:
-                        cl = str(c).lower()
-                        if "time" in cl or "date" in cl or "時間" in str(c) or "日期" in str(c):
-                            extra_time = c
-                            break
-                    if extra_time is None:
-                        continue
-                    extra_df[extra_time] = pd.to_datetime(extra_df[extra_time], errors="coerce")
-                    extra_df = extra_df.dropna(subset=[extra_time]).copy()
-                    # 找 CO/NMHC 欄位
-                    sp_norm = _norm_colname(sp_name)
-                    for c in extra_df.columns:
-                        if _norm_colname(c) == sp_norm:
-                            extra_df = extra_df[[extra_time, c]].copy()
-                            extra_df.columns = ["_merge_time", sp_name]
-                            extra_df["_merge_time"] = extra_df["_merge_time"].dt.round("min")
-                            df["_merge_time"] = df[time_col].dt.round("min")
-                            df = df.merge(extra_df, on="_merge_time", how="left")
-                            df = df.drop(columns=["_merge_time"])
-                            break
-                except Exception:
-                    pass
-
         df["_month"] = df[time_col].dt.to_period("M").astype(str)
         # 找出判定指標欄位（檔案裡有的才算）
         indicator_cols = []
@@ -1216,6 +1171,185 @@ def plot_b07_timeseries(dfs, params):
 
 register("B-07", "時間序列趨勢圖（均值±標準差）", "統計",
         "X軸為完整日期時間的濃度趨勢圖，需指定物種名稱，可上傳1-2個檔案", plot_b07_timeseries, needs_files=1)
+
+# --- B-08: 三檔合併 + 3σ 人為源篩選 ---
+def plot_b08_merge_filter(dfs, params):
+    """合併 SIFT-MS + 空品站兩份，做 3σ 篩選，回傳 Excel bytes"""
+    import io as _io
+
+    SIGMA_N = 3
+    SIGMA_BASE_COLS = ["1,3-butadiene", "toluene", "benzene", "CO", "NMHC"]
+
+    def _normalize_name(x):
+        return str(x).strip().lower().replace(" ", "").replace("_", "").replace("-", "").replace("（", "(").replace("）", ")")
+
+    def _find_col(df, target):
+        target_norm = _normalize_name(target)
+        for c in df.columns:
+            if _normalize_name(c) == target_norm:
+                return c
+        for c in df.columns:
+            if target_norm in _normalize_name(c):
+                return c
+        return None
+
+    def _find_time_col(df):
+        for c in df.columns:
+            cl = str(c).lower()
+            if "time" in cl or "date" in cl or "時間" in str(c) or "日期" in str(c):
+                return c
+        raise ValueError("找不到時間欄位")
+
+    def _make_unique(cols):
+        new_cols, counts = [], {}
+        for c in cols:
+            c = str(c).strip()
+            if c not in counts:
+                counts[c] = 0
+                new_cols.append(c)
+            else:
+                counts[c] += 1
+                new_cols.append(f"{c}_{counts[c]}")
+        return new_cols
+
+    # dfs[0] = SIFT-MS, dfs[1] = 空品站1, dfs[2] = 空品站2
+    sift_raw = dfs[0]
+    # 處理 SIFT-MS 格式
+    if any("analyte" in str(c).lower() for c in sift_raw.columns):
+        new_header = sift_raw.iloc[0].tolist()
+        sift_df = sift_raw[1:].copy()
+        sift_df.columns = new_header
+        sift_df = sift_df.reset_index(drop=True)
+    else:
+        sift_df = sift_raw.copy()
+
+    sift_df.columns = _make_unique(sift_df.columns)
+    sift_time = _find_time_col(sift_df)
+    sift_df["Time"] = pd.to_datetime(sift_df[sift_time], errors="coerce")
+    sift_df = sift_df[sift_df["Time"].notna()].copy()
+    if sift_time != "Time":
+        sift_df = sift_df.drop(columns=[sift_time])
+    sift_df = sift_df.drop_duplicates(subset="Time", keep="first")
+    sift_df["Hour"] = sift_df["Time"].dt.floor("h")
+    cols = ["Time", "Hour"] + [c for c in sift_df.columns if c not in ["Time", "Hour"]]
+    sift_df = sift_df[cols]
+
+    # 空品站資料
+    hourly_list = []
+    for i in range(1, len(dfs)):
+        h_df = dfs[i].copy()
+        h_df.columns = _make_unique(h_df.columns)
+        h_time = _find_time_col(h_df)
+        h_df["Hour"] = pd.to_datetime(h_df[h_time], errors="coerce")
+        h_df = h_df[h_df["Hour"].notna()].copy()
+        h_df["Hour"] = h_df["Hour"].dt.floor("h")
+        if h_time != "Hour":
+            h_df = h_df.drop(columns=[h_time])
+        hourly_list.append(h_df)
+
+    hourly_all = pd.concat(hourly_list, axis=0, ignore_index=True, sort=False)
+    hourly_all = hourly_all.sort_values("Hour").drop_duplicates(subset="Hour", keep="last").reset_index(drop=True)
+
+    # 時間範圍
+    air_start = params.get("start_date", pd.to_datetime("2025-05-01"))
+    sift_start = params.get("sift_start", pd.to_datetime("2025-10-01"))
+    end_time = params.get("end_date", pd.to_datetime("2026-05-31 23:59:59"))
+
+    sift_df = sift_df[(sift_df["Time"] >= sift_start) & (sift_df["Time"] <= end_time)].copy()
+    hourly_all = hourly_all[(hourly_all["Hour"] >= air_start) & (hourly_all["Hour"] <= end_time)].copy()
+
+    # 建立完整 2.5 分鐘時間軸
+    full_time = pd.DataFrame({"Time": pd.date_range(start=air_start, end=end_time, freq="150s")})
+    all_time = pd.concat([full_time[["Time"]], sift_df[["Time"]]], axis=0, ignore_index=True)
+    all_time = all_time.drop_duplicates(subset="Time").sort_values("Time").reset_index(drop=True)
+    all_time["Hour"] = all_time["Time"].dt.floor("h")
+
+    # 合併
+    merged = pd.merge(all_time, sift_df.drop(columns=["Hour"]), on="Time", how="left")
+    merged["Hour"] = merged["Time"].dt.floor("h")
+    merged = pd.merge(merged, hourly_all, on="Hour", how="left")
+    merged = merged.sort_values("Time").reset_index(drop=True)
+
+    # 3σ 篩選
+    time_col = _find_time_col(merged)
+    merged[time_col] = pd.to_datetime(merged[time_col], errors="coerce")
+    merged["月份"] = merged[time_col].dt.to_period("M").astype(str)
+
+    base_col_map = {}
+    for col in SIGMA_BASE_COLS:
+        found = _find_col(merged, col)
+        if found is not None:
+            base_col_map[col] = found
+            merged[found] = pd.to_numeric(merged[found], errors="coerce")
+
+    judged_df = merged.copy()
+    judged_df["任一人為源超出3sigma"] = "否"
+    judged_df["排除原因"] = ""
+
+    summary_records = []
+    outlier_records = []
+
+    for month in sorted(merged["月份"].dropna().unique()):
+        month_mask = merged["月份"] == month
+        for base_name, base_col in base_col_map.items():
+            values = merged.loc[month_mask, base_col].dropna()
+            if len(values) <= 1:
+                continue
+            mean_val = values.mean()
+            std_val = values.std(ddof=1)
+            lower = mean_val - SIGMA_N * std_val
+            upper = mean_val + SIGMA_N * std_val
+            outlier_mask = month_mask & merged[base_col].notna() & ((merged[base_col] < lower) | (merged[base_col] > upper))
+            outlier_count = int(outlier_mask.sum())
+
+            judged_df.loc[outlier_mask, "任一人為源超出3sigma"] = "是"
+            old_reason = judged_df.loc[outlier_mask, "排除原因"].astype(str)
+            judged_df.loc[outlier_mask, "排除原因"] = np.where(
+                old_reason.eq("") | old_reason.eq("nan"),
+                base_name, old_reason + "、" + base_name
+            )
+
+            summary_records.append({"月份": month, "判定物質": base_name, "平均值": mean_val, "sigma": std_val, "下界": lower, "上界": upper, "超標筆數": outlier_count})
+            for idx in merged.index[outlier_mask]:
+                outlier_records.append({"時間": merged.loc[idx, time_col], "月份": month, "判定物質": base_name, "濃度": merged.loc[idx, base_col], "下界": lower, "上界": upper})
+
+    remove_mask = judged_df["任一人為源超出3sigma"] == "是"
+    filtered_df = judged_df.loc[~remove_mask].copy()
+
+    summary_df = pd.DataFrame(summary_records)
+    outlier_df = pd.DataFrame(outlier_records)
+
+    # 輸出 Excel
+    excel_buf = _io.BytesIO()
+    with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
+        filtered_df.to_excel(writer, sheet_name="3SIGMA刪除後", index=False)
+        judged_df.to_excel(writer, sheet_name="3SIGMA判定結果", index=False)
+        summary_df.to_excel(writer, sheet_name="3SIGMA統計", index=False)
+        outlier_df.to_excel(writer, sheet_name="Outlier清單", index=False)
+    excel_buf.seek(0)
+
+    # 回傳一個簡單的統計圖 + Excel
+    import matplotlib.pyplot as plt2
+    fig2, ax2 = plt2.subplots(figsize=(10, 6), dpi=150)
+    if not summary_df.empty:
+        months = summary_df["月份"].unique()
+        for sp in SIGMA_BASE_COLS:
+            sub = summary_df[summary_df["判定物質"] == sp]
+            if not sub.empty:
+                ax2.plot(sub["月份"], sub["超標筆數"], marker="o", label=sp)
+        ax2.set_xlabel("月份")
+        ax2.set_ylabel("超標筆數")
+        ax2.set_title("3σ 篩選統計")
+        ax2.legend()
+        ax2.tick_params(axis="x", rotation=45)
+    else:
+        ax2.text(0.5, 0.5, "無篩選資料", ha="center", va="center")
+    fig2.tight_layout()
+
+    return fig2, excel_buf
+
+register("B-08", "三檔合併 + 3σ 人為源篩選", "統計",
+        "上傳 SIFT-MS + 空品站兩份，自動合併並做 3σ 篩選，輸出 Excel", plot_b08_merge_filter, needs_files=3)
 
 
 # ============================================================
