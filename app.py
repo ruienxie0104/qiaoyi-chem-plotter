@@ -16,10 +16,11 @@ st.set_page_config(
 )
 
 st.title("📊 鳳凰谷化學繪圖平台")
+st.markdown("上傳 Excel → 生成圖表。點展開對應的片段即可操作。")
 st.markdown("---")
 
 # ============================================================
-# 取得片段列表
+# 取得片段列表，按分類分組
 # ============================================================
 registry = get_registry()
 categories = {}
@@ -30,163 +31,203 @@ for item in registry:
     categories[cat].append(item)
 
 # ============================================================
-# 側邊欄：選擇片段
+# 每個片段一個 accordion（st.expander）
 # ============================================================
-st.sidebar.title("🔧 選擇圖表")
 
-# 按分類列出
-all_ids = []
+# 用 session_state 儲存每個片段的生成結果
+if "plot_results" not in st.session_state:
+    st.session_state.plot_results = {}
+
 for cat, items in categories.items():
-    st.sidebar.markdown(f"### {cat}")
+    st.markdown(f"## {cat}")
     for item in items:
-        label = f"{item['id']}  {item['name']}"
-        all_ids.append(label)
+        plot_id = item["id"]
+        plot_name = item["name"]
+        plot_desc = item["description"]
+        needs = item["needs_files"]
+        key_prefix = f"{plot_id}"
 
-selected_label = st.sidebar.radio("選擇繪圖片段", all_ids)
+        with st.expander(f"{plot_id}  {plot_name}", expanded=False):
+            st.caption(plot_desc)
+            st.markdown(f"📁 **需要上傳 {needs} 個檔案**")
 
-# 解析選擇
-selected_id = selected_label.split("  ")[0].strip()
-plot_info = get_plot_by_id(selected_id)
-
-st.sidebar.markdown("---")
-st.sidebar.markdown(f"**編號：** {plot_info['id']}")
-st.sidebar.markdown(f"**名稱：** {plot_info['name']}")
-st.sidebar.markdown(f"**分類：** {plot_info['category']}")
-st.sidebar.markdown(f"**說明：** {plot_info['description']}")
-st.sidebar.markdown(f"**需要檔案數：** {plot_info['needs_files']}")
-
-# ============================================================
-# 主區域：上傳檔案 + 參數 + 生成
-# ============================================================
-st.header(f"{plot_info['id']} — {plot_info['name']}")
-
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    needs = plot_info["needs_files"]
-    uploaded_files = []
-    for i in range(needs):
-        f = st.file_uploader(
-            f"上傳 Excel 檔案 {i+1}",
-            type=["xlsx", "xls", "csv"],
-            key=f"file_{plot_info['id']}_{i}"
-        )
-        if f is not None:
-            uploaded_files.append(f)
-
-with col2:
-    st.subheader("參數設定")
-    params = {}
-
-    # 日期範圍（A 系列用）
-    if plot_info["category"] == "空氣品質" or plot_info["id"] == "B-05":
-        col_a, col_b = st.columns(2)
-        with col_a:
-            start_date = st.date_input("開始日期", value=pd.to_datetime("2025-05-01"))
-            params["start_date"] = pd.to_datetime(start_date)
-        with col_b:
-            end_date = st.date_input("結束日期", value=pd.to_datetime("2026-05-31"))
-            params["end_date"] = pd.to_datetime(end_date)
-
-    # y 軸設定（A 系列）
-    if plot_info["category"] == "空氣品質" and plot_info["id"] != "A-09":
-        y_max = st.number_input("Y軸上限（留空=自動）", value=0.0, step=0.1, help="設為 0 表示使用預設值")
-        if y_max > 0:
-            params["y_max"] = y_max
-        y_tick = st.number_input("Y軸刻度間距", value=0.0, step=0.1, help="設為 0 表示使用預設值")
-        if y_tick > 0:
-            params["y_tick"] = y_tick
-
-    # SCALE
-    scale = st.slider("圖表縮放比例", min_value=0.8, max_value=2.0, value=1.4, step=0.1)
-    params["scale"] = scale
-
-    # B-06: 物種選擇
-    if plot_info["id"] == "B-06":
-        species_options = [
-            "1,3-butadiene", "acetaldehyde", "benzene", "formaldehyde",
-            "isoprene", "MACR", "MEK", "MVK", "toluene", "total_monoterpene",
-            "PM2.5", "PM10", "CO", "O3", "NO", "NO2", "NMHC"
-        ]
-        params["species"] = st.selectbox("選擇物種", species_options, index=13)
-
-    # B-01: sheet 名稱提示
-    if plot_info["id"] == "B-01":
-        params["sheet_name"] = st.text_input("工作表名稱（含「線性」「回收」或「RSD」）", value="")
-
-# ============================================================
-# 生成按鈕
-# ============================================================
-st.markdown("---")
-
-if st.button("🎨 生成圖表", type="primary"):
-    if len(uploaded_files) < needs:
-        st.warning(f"請上傳 {needs} 個檔案（目前已上傳 {len(uploaded_files)} 個）")
-    else:
-        with st.spinner("處理中..."):
-            try:
-                # 讀取檔案
-                dfs = []
-                for f in uploaded_files:
-                    if f.name.endswith(".csv"):
-                        # 嘗試不同編碼
-                        try:
-                            df = pd.read_csv(f, encoding="utf-8")
-                        except UnicodeDecodeError:
-                            f.seek(0)
-                            try:
-                                df = pd.read_csv(f, encoding="big5")
-                            except UnicodeDecodeError:
-                                f.seek(0)
-                                df = pd.read_csv(f, encoding="cp950")
-                    else:
-                        df = pd.read_excel(f, engine="openpyxl")
-                    dfs.append(df)
-
-                # 執行繪圖
-                result = plot_info["func"](dfs, params)
-
-                # 處理回傳（可能是 fig, 或 fig + excel_bytes）
-                if isinstance(result, tuple):
-                    fig, excel_bytes = result
-                    st.pyplot(fig)
-                    st.download_button(
-                        label="📥 下載統計表 Excel",
-                        data=excel_bytes,
-                        file_name=f"{plot_info['id']}_統計表.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            # --- 上傳區 ---
+            uploaded_files = []
+            cols = st.columns(needs)
+            for i in range(needs):
+                with cols[i]:
+                    f = st.file_uploader(
+                        f"檔案 {i+1}",
+                        type=["xlsx", "xls", "csv"],
+                        key=f"file_{key_prefix}_{i}"
                     )
-                else:
-                    fig = result
-                    st.pyplot(fig)
+                    if f is not None:
+                        uploaded_files.append(f)
 
-                # 下載圖片
-                buf = io.BytesIO()
-                fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
-                buf.seek(0)
-                st.download_button(
-                    label="📥 下載圖片 PNG",
-                    data=buf,
-                    file_name=f"{plot_info['id']}_{plot_info['name']}.png",
-                    mime="image/png"
+            # --- 參數區 ---
+            params = {}
+            param_cols = st.columns([1, 1, 1])
+
+            with param_cols[0]:
+                # 日期範圍（A 系列用 + B-05）
+                if cat == "空氣品質" or plot_id == "B-05":
+                    start_date = st.date_input(
+                        "開始日期", value=pd.to_datetime("2025-05-01"),
+                        key=f"start_{key_prefix}"
+                    )
+                    params["start_date"] = pd.to_datetime(start_date)
+
+            with param_cols[1]:
+                if cat == "空氣品質" or plot_id == "B-05":
+                    end_date = st.date_input(
+                        "結束日期", value=pd.to_datetime("2026-05-31"),
+                        key=f"end_{key_prefix}"
+                    )
+                    params["end_date"] = pd.to_datetime(end_date)
+
+            with param_cols[2]:
+                if cat == "空氣品質" and plot_id != "A-09":
+                    y_max = st.number_input(
+                        "Y軸上限（0=預設）", value=0.0, step=0.1,
+                        key=f"ymax_{key_prefix}"
+                    )
+                    if y_max > 0:
+                        params["y_max"] = y_max
+
+            # 第二行參數
+            param_cols2 = st.columns([1, 1, 1])
+            with param_cols2[0]:
+                if cat == "空氣品質" and plot_id != "A-09":
+                    y_tick = st.number_input(
+                        "Y軸刻度間距（0=預設）", value=0.0, step=0.1,
+                        key=f"ytick_{key_prefix}"
+                    )
+                    if y_tick > 0:
+                        params["y_tick"] = y_tick
+            with param_cols2[1]:
+                scale = st.slider(
+                    "圖表縮放", min_value=0.8, max_value=2.0, value=1.4, step=0.1,
+                    key=f"scale_{key_prefix}"
                 )
+                params["scale"] = scale
+            with param_cols2[2]:
+                # B-06: 物種選擇
+                if plot_id == "B-06":
+                    species_options = [
+                        "1,3-butadiene", "acetaldehyde", "benzene", "formaldehyde",
+                        "isoprene", "MACR", "MEK", "MVK", "toluene", "total_monoterpene",
+                        "PM2.5", "PM10", "CO", "O3", "NO", "NO2", "NMHC"
+                    ]
+                    params["species"] = st.selectbox(
+                        "物種", species_options, index=13,
+                        key=f"species_{key_prefix}"
+                    )
+                # B-01: sheet 名稱
+                if plot_id == "B-01":
+                    params["sheet_name"] = st.text_input(
+                        "工作表名稱（含「線性」「回收」或「RSD」）",
+                        value="",
+                        key=f"sheet_{key_prefix}"
+                    )
 
-                st.success("✅ 圖表生成完成！")
+            # --- 生成按鈕 ---
+            btn_clicked = st.button(
+                "🎨 生成圖表",
+                key=f"btn_{key_prefix}",
+                type="primary"
+            )
 
-            except Exception as e:
-                st.error(f"❌ 生成失敗：{str(e)}")
-                st.markdown("**除錯資訊：**")
-                st.code(f"片段編號: {plot_info['id']}\n錯誤: {repr(e)}")
+            # --- 結果區 ---
+            result_key = f"result_{key_prefix}"
+            if btn_clicked:
+                if len(uploaded_files) < needs:
+                    st.warning(f"請上傳 {needs} 個檔案（目前已上傳 {len(uploaded_files)} 個）")
+                else:
+                    with st.spinner("處理中..."):
+                        try:
+                            # 讀取檔案
+                            dfs = []
+                            for f in uploaded_files:
+                                if f.name.endswith(".csv"):
+                                    try:
+                                        df = pd.read_csv(f, encoding="utf-8")
+                                    except UnicodeDecodeError:
+                                        f.seek(0)
+                                        try:
+                                            df = pd.read_csv(f, encoding="big5")
+                                        except UnicodeDecodeError:
+                                            f.seek(0)
+                                            df = pd.read_csv(f, encoding="cp950")
+                                else:
+                                    df = pd.read_excel(f, engine="openpyxl")
+                                dfs.append(df)
 
-# ============================================================
-# 底部：片段列表總覽
-# ============================================================
+                            # 執行繪圖
+                            result = item["func"](dfs, params)
+
+                            if isinstance(result, tuple):
+                                fig, excel_bytes = result
+                                st.session_state[result_key] = ("fig_excel", fig, excel_bytes)
+                            else:
+                                fig = result
+                                st.session_state[result_key] = ("fig", fig)
+
+                            st.success("✅ 圖表生成完成！")
+
+                        except Exception as e:
+                            st.error(f"❌ 生成失敗：{str(e)}")
+                            st.code(f"片段編號: {plot_id}\n錯誤: {repr(e)}")
+
+            # 顯示已存的結果
+            if result_key in st.session_state:
+                stored = st.session_state[result_key]
+                if stored[0] == "fig":
+                    fig = stored[1]
+                    st.pyplot(fig)
+                    buf = io.BytesIO()
+                    fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
+                    buf.seek(0)
+                    st.download_button(
+                        label="📥 下載圖片 PNG",
+                        data=buf,
+                        file_name=f"{plot_id}_{plot_name}.png",
+                        mime="image/png",
+                        key=f"dl_{key_prefix}"
+                    )
+                elif stored[0] == "fig_excel":
+                    fig, excel_bytes = stored[1], stored[2]
+                    st.pyplot(fig)
+                    dl_cols = st.columns(2)
+                    with dl_cols[0]:
+                        buf = io.BytesIO()
+                        fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
+                        buf.seek(0)
+                        st.download_button(
+                            label="📥 下載圖片 PNG",
+                            data=buf,
+                            file_name=f"{plot_id}_{plot_name}.png",
+                            mime="image/png",
+                            key=f"dl_png_{key_prefix}"
+                        )
+                    with dl_cols[1]:
+                        st.download_button(
+                            label="📥 下載統計表 Excel",
+                            data=excel_bytes,
+                            file_name=f"{plot_id}_統計表.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"dl_xlsx_{key_prefix}"
+                        )
+
+        st.markdown("")  # 間距
+
 st.markdown("---")
-st.markdown("## 📋 所有片段列表")
+st.markdown("### 📝 使用說明")
+st.markdown("""
+1. 找到你要的圖表編號，點展開
+2. 上傳 Excel/CSV 檔案
+3. 調整參數（日期範圍、Y軸等，可留空用預設值）
+4. 點「生成圖表」
+5. 圖片下方可下載 PNG
 
-for cat, items in categories.items():
-    with st.expander(f"{cat}（{len(items)} 個片段）"):
-        for item in items:
-            st.markdown(f"**{item['id']}** — {item['name']}")
-            st.markdown(f"　{item['description']}")
-            st.markdown("")
+**需要新增圖表或修改既有片段？** 跟 Rosia 說編號 + 需求即可。
+""")
