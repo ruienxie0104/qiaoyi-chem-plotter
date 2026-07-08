@@ -914,7 +914,7 @@ def plot_b06_diurnal(dfs, params):
         "NO": (0, 4, 1), "NO2": (0, 12, 3), "NMHC": (0, 0.06, 0.02)
     }
 
-    df = dfs[0].copy()
+    df = pd.concat([d.copy() for d in dfs], ignore_index=True)
     # 找時間欄位
     time_col = None
     for c in df.columns:
@@ -981,7 +981,7 @@ def plot_b06_diurnal(dfs, params):
     return fig
 
 register("B-06", "季節 Diurnal 比較圖", "統計",
-        "各季節小時均值±標準差比較圖，需指定物種名稱", plot_b06_diurnal, needs_files=1)
+        "各季節小時均值±標準差比較圖，需指定物種名稱，可上傳兩個檔案合併", plot_b06_diurnal, needs_files=2)
 
 
 # ============================================================
