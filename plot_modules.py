@@ -969,7 +969,14 @@ def plot_b06_diurnal(dfs, params):
     ax.set_xlim(0, 23)
     ax.set_xticks(range(0, 24, 2))
     ax.set_ylabel(YLABEL_DICT.get(species, species), fontsize=LABEL_FS, fontweight="bold")
-    if species in YLIM_DICT:
+    # Y軸自訂
+    y_max_custom = params.get("y_max", 0)
+    y_tick_custom = params.get("y_tick", 0)
+    if y_max_custom and y_max_custom > 0:
+        ax.set_ylim(0, y_max_custom)
+        if y_tick_custom and y_tick_custom > 0:
+            ax.set_yticks(np.arange(0, y_max_custom + y_tick_custom, y_tick_custom))
+    elif species in YLIM_DICT:
         ymin, ymax, ytick = YLIM_DICT[species]
         ax.set_ylim(ymin, ymax)
         ax.set_yticks(np.arange(ymin, ymax + ytick, ytick))

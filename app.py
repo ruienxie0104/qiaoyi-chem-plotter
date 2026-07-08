@@ -125,6 +125,13 @@ for cat, items in categories.items():
                     )
                     if y_tick_a09 > 0:
                         params["y_tick"] = y_tick_a09
+                if plot_id == "B-06":
+                    y_tick_b06 = st.number_input(
+                        "Y軸刻度間距（0=預設）", value=0.0, step=0.1,
+                        key=f"ytick_{key_prefix}"
+                    )
+                    if y_tick_b06 > 0:
+                        params["y_tick"] = y_tick_b06
             with param_cols2[1]:
                 scale = st.slider(
                     "圖表縮放", min_value=0.8, max_value=2.0, value=1.4, step=0.1,
@@ -132,7 +139,7 @@ for cat, items in categories.items():
                 )
                 params["scale"] = scale
             with param_cols2[2]:
-                # B-06: 物種選擇
+                # B-06: 物種選擇 + Y軸
                 if plot_id == "B-06":
                     species_options = [
                         "1,3-butadiene", "acetaldehyde", "benzene", "formaldehyde",
@@ -143,6 +150,12 @@ for cat, items in categories.items():
                         "物種", species_options, index=13,
                         key=f"species_{key_prefix}"
                     )
+                    y_max_b06 = st.number_input(
+                        "Y軸上限（0=預設）", value=0.0, step=0.1,
+                        key=f"ymax_{key_prefix}"
+                    )
+                    if y_max_b06 > 0:
+                        params["y_max"] = y_max_b06
                 # B-01: 圖表類型選擇 + 工作表選擇
                 if plot_id == "B-01":
                     plot_type_options = ["自動判斷", "線性 (Linearity R²)", "回收率 (Recovery %)", "%RSD"]
