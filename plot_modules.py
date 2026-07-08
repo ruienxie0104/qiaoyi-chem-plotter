@@ -515,7 +515,7 @@ def plot_b01_calibration_boxplot(dfs, params):
             data_list.append(values)
 
     fig, ax = plt.subplots(figsize=FIGSIZE, dpi=DPI)
-    bp = ax.boxplot(data_list, labels=species_order, patch_artist=True, widths=0.55,
+    bp = ax.boxplot(data_list, tick_labels=species_order, patch_artist=True, widths=0.55,
                     showfliers=False, medianprops=dict(color="black", linewidth=2.4),
                     boxprops=dict(linewidth=2.0), whiskerprops=dict(linewidth=2.0), capprops=dict(linewidth=2.0))
     for i, patch in enumerate(bp["boxes"]):
