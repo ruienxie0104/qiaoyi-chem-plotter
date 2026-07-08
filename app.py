@@ -64,8 +64,8 @@ for cat, items in categories.items():
                     if f is not None:
                         uploaded_files.append(f)
 
-            # B-06/B-07: 可選第二個檔案
-            if plot_id in ("B-06", "B-07"):
+            # B-06: 可選第二個檔案
+            if plot_id == "B-06":
                 f2 = st.file_uploader(
                     "檔案 2（可選）",
                     type=["xlsx", "xls", "csv"],
@@ -73,6 +73,21 @@ for cat, items in categories.items():
                 )
                 if f2 is not None:
                     uploaded_files.append(f2)
+
+            # B-07: 檔案2 = CO, 檔案3 = NMHC（空品站資料）
+            if plot_id == "B-07":
+                f_co = st.file_uploader(
+                    "檔案 2：CO 數據（空品站）",
+                    type=["xlsx", "xls", "csv"],
+                    key=f"file_co_{key_prefix}"
+                )
+                f_nmhc = st.file_uploader(
+                    "檔案 3：NMHC 數據（空品站）",
+                    type=["xlsx", "xls", "csv"],
+                    key=f"file_nmhc_{key_prefix}"
+                )
+                params["file_co"] = f_co
+                params["file_nmhc"] = f_nmhc
 
             # --- 參數區 ---
             params = {}

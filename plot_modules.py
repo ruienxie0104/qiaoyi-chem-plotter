@@ -1077,6 +1077,51 @@ def plot_b07_timeseries(dfs, params):
     ANTHRO_INDICATORS = ["1,3-butadiene", "toluene", "benzene", "CO", "NMHC"]
     BIOGENIC_TARGETS = ["MVK", "MEK", "MACR", "total_monoterpene", "isoprene", "formaldehyde", "acetaldehyde"]
     if remove_anthro:
+        # 從額外上傳的檔案讀取 CO 和 NMHC
+        import io
+        for extra_key, sp_name in [("file_co", "CO"), ("file_nmhc", "NMHC")]:
+            f_extra = params.get(extra_key)
+            if f_extra is not None:
+                try:
+                    extra_bytes = f_extra.read()
+                    f_extra.seek(0)
+                    extra_df = None
+                    try:
+                        extra_df = pd.read_excel(io.BytesIO(extra_bytes), engine="openpyxl")
+                    except Exception:
+                        for enc in ["utf-8", "big5", "cp950"]:
+                            try:
+                                extra_df = pd.read_csv(io.BytesIO(extra_bytes), encoding=enc)
+                                break
+                            except Exception:
+                                continue
+                    if extra_df is None:
+                        continue
+                    # 找時間欄位
+                    extra_time = None
+                    for c in extra_df.columns:
+                        cl = str(c).lower()
+                        if "time" in cl or "date" in cl or "時間" in str(c) or "日期" in str(c):
+                            extra_time = c
+                            break
+                    if extra_time is None:
+                        continue
+                    extra_df[extra_time] = pd.to_datetime(extra_df[extra_time], errors="coerce")
+                    extra_df = extra_df.dropna(subset=[extra_time]).copy()
+                    # 找 CO/NMHC 欄位
+                    sp_norm = _norm_colname(sp_name)
+                    for c in extra_df.columns:
+                        if _norm_colname(c) == sp_norm:
+                            extra_df = extra_df[[extra_time, c]].copy()
+                            extra_df.columns = ["_merge_time", sp_name]
+                            extra_df["_merge_time"] = extra_df["_merge_time"].dt.round("min")
+                            df["_merge_time"] = df[time_col].dt.round("min")
+                            df = df.merge(extra_df, on="_merge_time", how="left")
+                            df = df.drop(columns=["_merge_time"])
+                            break
+                except Exception:
+                    pass
+
         df["_month"] = df[time_col].dt.to_period("M").astype(str)
         # 找出判定指標欄位（檔案裡有的才算）
         indicator_cols = []
