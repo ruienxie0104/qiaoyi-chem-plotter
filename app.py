@@ -94,6 +94,20 @@ for cat, items in categories.items():
                     if y_max > 0:
                         params["y_max"] = y_max
 
+                # A-09: 物種選擇 + Y軸
+                if plot_id == "A-09":
+                    species_options_a09 = ["CO", "NMHC", "O3", "NO", "NO2", "PM2.5", "PM10"]
+                    params["species"] = st.selectbox(
+                        "選擇物種", species_options_a09, index=0,
+                        key=f"species_{key_prefix}"
+                    )
+                    y_max_a09 = st.number_input(
+                        "Y軸上限（0=預設）", value=0.0, step=0.1,
+                        key=f"ymax_{key_prefix}"
+                    )
+                    if y_max_a09 > 0:
+                        params["y_max"] = y_max_a09
+
             # 第二行參數
             param_cols2 = st.columns([1, 1, 1])
             with param_cols2[0]:
@@ -104,6 +118,13 @@ for cat, items in categories.items():
                     )
                     if y_tick > 0:
                         params["y_tick"] = y_tick
+                if plot_id == "A-09":
+                    y_tick_a09 = st.number_input(
+                        "Y軸刻度間距（0=預設）", value=0.0, step=0.1,
+                        key=f"ytick_{key_prefix}"
+                    )
+                    if y_tick_a09 > 0:
+                        params["y_tick"] = y_tick_a09
             with param_cols2[1]:
                 scale = st.slider(
                     "圖表縮放", min_value=0.8, max_value=2.0, value=1.4, step=0.1,

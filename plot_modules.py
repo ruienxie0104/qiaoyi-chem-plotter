@@ -323,11 +323,14 @@ register("A-08", "NO 逐時濃度圖", "空氣品質", "NO 小時值趨勢圖", 
 
 # --- A-09: 七測項統一版趨勢圖 ---
 def plot_a09_unified(dfs, params):
-    """一次畫 7 種測項的統一版趨勢圖（只有季節配色線，不標月均值/最大值）"""
+    """統一版趨勢圖 — 使用者選擇物種"""
     TIME_COL = "時間"
     SCALE = params.get("scale", 1.8)
     start_date = pd.to_datetime(params.get("start_date", "2025-05-01"))
     end_date = pd.to_datetime(params.get("end_date", "2026-05-31 23:59:59"))
+
+    # 使用者選擇的物種
+    selected_species = params.get("species", "CO")
 
     matplotlib.rcParams["font.family"] = ["Microsoft JhengHei", "DejaVu Sans", "Arial Unicode MS"]
     matplotlib.rcParams["axes.unicode_minus"] = False
@@ -347,85 +350,84 @@ def plot_a09_unified(dfs, params):
         "PM10": (r"$PM_{10}$ (μg/m³)", 150, 30),
     }
 
+    if selected_species not in PLOT_ITEMS:
+        raise ValueError(f"不支援的物種：{selected_species}。可選：{list(PLOT_ITEMS.keys())}")
+
+    ylabel, default_ymax, default_ytick = PLOT_ITEMS[selected_species]
+
+    # 使用者自訂 Y 軸
+    ymax = params.get("y_max", 0)
+    if ymax and ymax > 0:
+        default_ymax = ymax
+    ytick = params.get("y_tick", 0)
+    if ytick and ytick > 0:
+        default_ytick = ytick
+
     MONTH_LABEL = {1:"J",2:"F",3:"M",4:"A",5:"M",6:"J",7:"J",8:"A",9:"S",10:"O",11:"N",12:"D"}
     season_colors = {"春": "#4F81BD", "夏": "#FF7F0E", "秋": "#2CA02C", "冬": "#D62728"}
 
-    # 只回傳第一張圖（CO），其餘可用 params["all"] 來觸發全部
-    # 但 Streamlit 一次只顯示一張，所以我們讓這個片段回傳所有圖的 dict
-    # 不過為了統一介面，我們回傳第一張，並在 app 裡特殊處理
-    # 簡化：回傳所有 7 張的 list
+    value_col = selected_species
+    df = read_excel_dfs(dfs, TIME_COL, value_col)
+    df_period = df[(df[TIME_COL] >= start_date) & (df[TIME_COL] <= end_date)].copy()
+    df_period.loc[df_period[value_col] <= 0, value_col] = np.nan
+    df_period["Month"] = df_period[TIME_COL].dt.to_period("M")
+    unique_months = sorted(df_period["Month"].dropna().unique())
 
-    figs = []
-    for value_col, (ylabel, ymax, ytick) in PLOT_ITEMS.items():
-        try:
-            df = read_excel_dfs(dfs, TIME_COL, value_col)
-        except KeyError:
+    month_start_idx = []
+    month_labels = []
+    first_year = None
+    for (year, month), group in df_period.groupby([df_period[TIME_COL].dt.year, df_period[TIME_COL].dt.month]):
+        month_start_idx.append(group[TIME_COL].iloc[0])
+        if first_year != year:
+            month_labels.append(f"{MONTH_LABEL[month]}\n{year}")
+            first_year = year
+        else:
+            month_labels.append(MONTH_LABEL[month])
+
+    fig, ax = plt.subplots(figsize=(16, 9), dpi=300)
+    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.22, top=0.78)
+    ax.set_xlim(start_date - pd.Timedelta(days=10), end_date)
+    ax.set_ylim(0, default_ymax)
+    ax.set_yticks(np.arange(0, default_ymax + 1e-9, default_ytick))
+
+    for month in unique_months:
+        ms = month.to_timestamp()
+        me = (month + 1).to_timestamp() - pd.Timedelta(seconds=1)
+        mdata = df_period[(df_period[TIME_COL] >= ms) & (df_period[TIME_COL] <= me)].sort_values(TIME_COL)
+        if mdata[value_col].dropna().empty:
             continue
-        df_period = df[(df[TIME_COL] >= start_date) & (df[TIME_COL] <= end_date)].copy()
-        df_period.loc[df_period[value_col] <= 0, value_col] = np.nan
-        df_period["Month"] = df_period[TIME_COL].dt.to_period("M")
-        unique_months = sorted(df_period["Month"].dropna().unique())
+        c = season_colors.get(month_to_season(month.month), "gray")
+        ax.plot(mdata[TIME_COL], mdata[value_col], marker="o", linestyle="-",
+                markersize=2.5, linewidth=1.0, color=c, markerfacecolor=c,
+                markeredgecolor=c, alpha=0.85, zorder=4)
 
-        month_start_idx = []
-        month_labels = []
-        first_year = None
-        for (year, month), group in df_period.groupby([df_period[TIME_COL].dt.year, df_period[TIME_COL].dt.month]):
-            month_start_idx.append(group[TIME_COL].iloc[0])
-            if first_year != year:
-                month_labels.append(f"{MONTH_LABEL[month]}\n{year}")
-                first_year = year
-            else:
-                month_labels.append(MONTH_LABEL[month])
+    season_handles = [
+        Line2D([0],[0], marker="o", linestyle="-", color=season_colors["春"],
+               markerfacecolor=season_colors["春"], markeredgecolor=season_colors["春"],
+               markersize=6, linewidth=1.5, label="Spring (Mar–May)"),
+        Line2D([0],[0], marker="o", linestyle="-", color=season_colors["夏"],
+               markerfacecolor=season_colors["夏"], markeredgecolor=season_colors["夏"],
+               markersize=6, linewidth=1.5, label="Summer (Jun–Aug)"),
+        Line2D([0],[0], marker="o", linestyle="-", color=season_colors["秋"],
+               markerfacecolor=season_colors["秋"], markeredgecolor=season_colors["秋"],
+               markersize=6, linewidth=1.5, label="Autumn (Sep–Nov)"),
+        Line2D([0],[0], marker="o", linestyle="-", color=season_colors["冬"],
+               markerfacecolor=season_colors["冬"], markeredgecolor=season_colors["冬"],
+               markersize=6, linewidth=1.5, label="Winter (Dec–Feb)"),
+    ]
+    ax.legend(handles=season_handles, loc="lower center", bbox_to_anchor=(0.5, 1.02),
+              ncol=4, frameon=False, fontsize=LEGEND_FS, columnspacing=1.5, handlelength=2.0)
+    ax.set_xlabel("Date", fontsize=LABEL_FS)
+    ax.set_ylabel(ylabel, fontsize=LABEL_FS, fontweight="bold")
+    ax.set_xticks(month_start_idx)
+    ax.set_xticklabels(month_labels, fontsize=TICK_FS, linespacing=1.5)
+    ax.tick_params(axis="x", pad=10)
+    ax.tick_params(axis="y", labelsize=TICK_FS)
+    ax.grid(color="gray", alpha=0.25)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
 
-        fig, ax = plt.subplots(figsize=(16, 9), dpi=300)
-        fig.subplots_adjust(left=0.08, right=0.98, bottom=0.22, top=0.78)
-        ax.set_xlim(start_date - pd.Timedelta(days=10), end_date)
-        ax.set_ylim(0, ymax)
-        ax.set_yticks(np.arange(0, ymax + 1e-9, ytick))
-
-        for month in unique_months:
-            ms = month.to_timestamp()
-            me = (month + 1).to_timestamp() - pd.Timedelta(seconds=1)
-            mdata = df_period[(df_period[TIME_COL] >= ms) & (df_period[TIME_COL] <= me)].sort_values(TIME_COL)
-            if mdata[value_col].dropna().empty:
-                continue
-            c = season_colors.get(month_to_season(month.month), "gray")
-            ax.plot(mdata[TIME_COL], mdata[value_col], marker="o", linestyle="-",
-                    markersize=2.5, linewidth=1.0, color=c, markerfacecolor=c,
-                    markeredgecolor=c, alpha=0.85, zorder=4)
-
-        season_handles = [
-            Line2D([0],[0], marker="o", linestyle="-", color=season_colors["春"],
-                   markerfacecolor=season_colors["春"], markeredgecolor=season_colors["春"],
-                   markersize=6, linewidth=1.5, label="Spring (Mar–May)"),
-            Line2D([0],[0], marker="o", linestyle="-", color=season_colors["夏"],
-                   markerfacecolor=season_colors["夏"], markeredgecolor=season_colors["夏"],
-                   markersize=6, linewidth=1.5, label="Summer (Jun–Aug)"),
-            Line2D([0],[0], marker="o", linestyle="-", color=season_colors["秋"],
-                   markerfacecolor=season_colors["秋"], markeredgecolor=season_colors["秋"],
-                   markersize=6, linewidth=1.5, label="Autumn (Sep–Nov)"),
-            Line2D([0],[0], marker="o", linestyle="-", color=season_colors["冬"],
-                   markerfacecolor=season_colors["冬"], markeredgecolor=season_colors["冬"],
-                   markersize=6, linewidth=1.5, label="Winter (Dec–Feb)"),
-        ]
-        ax.legend(handles=season_handles, loc="lower center", bbox_to_anchor=(0.5, 1.02),
-                  ncol=4, frameon=False, fontsize=LEGEND_FS, columnspacing=1.5, handlelength=2.0)
-        ax.set_xlabel("Date", fontsize=LABEL_FS)
-        ax.set_ylabel(ylabel, fontsize=LABEL_FS, fontweight="bold")
-        ax.set_xticks(month_start_idx)
-        ax.set_xticklabels(month_labels, fontsize=TICK_FS, linespacing=1.5)
-        ax.tick_params(axis="x", pad=10)
-        ax.tick_params(axis="y", labelsize=TICK_FS)
-        ax.grid(color="gray", alpha=0.25)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        figs.append((value_col, fig))
-        plt.close(fig)
-
-    # 回傳第一張作為主要圖
-    if figs:
-        return figs[0][1]
-    raise ValueError("無法生成任何圖表，請檢查資料欄位")
+    return fig
 
 register("A-09", "七測項統一版趨勢圖", "空氣品質", "CO/NMHC/O3/NO/NO2/PM2.5/PM10 統一版趨勢圖（只有季節配色線）", plot_a09_unified)
 
