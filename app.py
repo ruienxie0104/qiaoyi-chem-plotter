@@ -49,15 +49,20 @@ for cat, items in categories.items():
 
         with st.expander(f"{plot_id}  {plot_name}", expanded=False):
             st.caption(plot_desc)
-            st.markdown(f"📁 **需要上傳 {needs} 個檔案**")
+            if plot_id == "B-08":
+                st.markdown("📁 **需要上傳 3 個檔案：SIFT-MS + 空品站×2**")
+            else:
+                st.markdown(f"📁 **需要上傳 {needs} 個檔案**")
 
             # --- 上傳區 ---
             uploaded_files = []
             cols = st.columns(needs)
             for i in range(needs):
                 with cols[i]:
+                    label = "SIFT-MS" if (plot_id == "B-08" and i == 0) else \
+                            f"空品站 {i}" if plot_id == "B-08" else f"檔案 {i+1}"
                     f = st.file_uploader(
-                        f"檔案 {i+1}",
+                        label,
                         type=["xlsx", "xls", "csv"],
                         key=f"file_{key_prefix}_{i}"
                     )
@@ -219,8 +224,9 @@ for cat, items in categories.items():
                             pass
 
             # --- 生成按鈕 ---
+            btn_label = "📥 合併並篩選" if plot_id == "B-08" else "🎨 生成圖表"
             btn_clicked = st.button(
-                "🎨 生成圖表",
+                btn_label,
                 key=f"btn_{key_prefix}",
                 type="primary"
             )
@@ -280,7 +286,10 @@ for cat, items in categories.items():
                                 fig = result
                                 st.session_state[result_key] = ("fig", fig)
 
-                            st.success("✅ 圖表生成完成！")
+                            if plot_id == "B-08":
+                                st.success("✅ 合併並篩選完成！可下載 Excel 檔案。")
+                            else:
+                                st.success("✅ 圖表生成完成！")
 
                         except Exception as e:
                             st.error(f"❌ 生成失敗：{str(e)}")
