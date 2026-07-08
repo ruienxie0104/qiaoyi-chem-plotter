@@ -502,9 +502,20 @@ def plot_b01_calibration_boxplot(dfs, params):
         species_order = df[species_col].drop_duplicates().tolist()
         data_list = [df.loc[df[species_col] == sp, value_col].dropna() for sp in species_order]
     else:
-        conc_cols = [c for c in ["10 ppb", "15 ppb", "20 ppb", "25 ppb", "30 ppb"] if c in df.columns]
+        # 回收率/%RSD：找 10-30 ppb 濃度欄位（模糊匹配）
+        conc_cols = []
+        for target in ["10 ppb", "15 ppb", "20 ppb", "25 ppb", "30 ppb"]:
+            tn = _norm_colname(target)
+            for c in df.columns:
+                if _norm_colname(c) == tn:
+                    conc_cols.append(c)
+                    break
         if not conc_cols:
-            raise ValueError("找不到 10–30 ppb 濃度欄位")
+            # 更寬鬆：找任何含 ppb 的欄位
+            conc_cols = [c for c in df.columns if "ppb" in str(c).lower()]
+            conc_cols = sorted(conc_cols)
+        if not conc_cols:
+            raise ValueError(f"找不到濃度欄位（10-30 ppb）。現有欄位：{list(df.columns)}")
         species_order = df[species_col].drop_duplicates().tolist()
         data_list = []
         for sp in species_order:
@@ -514,6 +525,10 @@ def plot_b01_calibration_boxplot(dfs, params):
                 vals = pd.to_numeric(sub_df[col], errors="coerce").dropna()
                 values.extend(vals.tolist())
             data_list.append(values)
+        # 檢查是否有抓到資料
+        total_points = sum(len(d) for d in data_list)
+        if total_points == 0:
+            raise ValueError(f"所有物種都沒有有效數值。濃度欄位：{conc_cols}，物種：{species_order}")
 
     fig, ax = plt.subplots(figsize=FIGSIZE, dpi=DPI)
     bp = ax.boxplot(data_list, tick_labels=species_order, patch_artist=True, widths=0.55,
