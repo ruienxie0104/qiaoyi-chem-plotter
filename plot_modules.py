@@ -438,23 +438,23 @@ register("A-09", "七測項統一版趨勢圖", "空氣品質", "CO/NMHC/O3/NO/N
 # --- B-01: 檢量盒鬚圖 ---
 def plot_b01_calibration_boxplot(dfs, params):
     """檢量盒鬚圖（線性R²/回收率/%RSD）
-    支援兩種 Excel 格式：
-    1. 單 sheet 含物種欄位（物種/Species/Compound）
-    2. 多 sheet，每個 sheet 名稱 = 物種名，自動讀取所有 sheet 一起比較
+    讀取 5 個物種 sheet（Isoprene/MACR/MEK/MVK/MONOTERPENE calibr.）
+    - RSD：抓 RSD 欄位做盒鬚圖
+    - 回收率：抓 回收率 欄位做盒鬚圖
+    - 線性：用 理論濃度 vs 真實濃度 做散布圖 + R²
     """
     FIGSIZE = (12, 7)
     DPI = 300
     LABEL_FS = 24
     TICK_FS = 20
-    COLORS = ["#1D4E89", "#4F81BD", "#6C8EBF", "#9DC3E6", "#B7C9E2",
-              "#A8C8E8", "#7BAFD4", "#5B8FB9", "#3A6EA5", "#2E5A88"]
+    COLORS = ["#1D4E89", "#4F81BD", "#6C8EBF", "#9DC3E6", "#B7C9E2"]
 
     matplotlib.rcParams["font.family"] = ["Microsoft JhengHei", "Arial", "Arial Unicode MS"]
     matplotlib.rcParams["axes.unicode_minus"] = False
     matplotlib.rcParams["font.size"] = TICK_FS
 
     PLOT_SETTINGS = {
-        "線性": {"ylabel": "Linearity (R\u00b2)", "xlabel": "Target Compounds", "ylim": (0.995, 1.0005), "qc_lines": [0.995]},
+        "線性": {"ylabel": "Actual Concentration", "xlabel": "Theoretical Concentration"},
         "回收率": {"ylabel": "Recovery (%)", "xlabel": "Target Compounds", "ylim": (80, 120), "qc_lines": [85, 115]},
         "%RSD": {"ylabel": "RSD (%)", "xlabel": "Target Compounds", "ylim": (0, 10), "qc_lines": [10]},
     }
@@ -462,106 +462,139 @@ def plot_b01_calibration_boxplot(dfs, params):
     # --- 取得所有 sheet ---
     all_sheets = params.get("all_sheets", None)
     df = dfs[0].copy()
-    sheet_name = params.get("sheet_name", "")
     plot_type = params.get("plot_type", "")
 
-    # 已知的物種名稱（用來過濾非物種 sheet）
-    KNOWN_SPECIES = ["isoprene", "macr", "mek", "mvk", "monoterpene", "butadiene",
-                     "benzene", "toluene", "formaldehyde", "acetaldehyde"]
-
-    # 自動判斷圖類型
+    # 如果沒有指定類型，自動判斷
     if not plot_type:
-        check_text = sheet_name
-        if all_sheets:
-            check_text += " " + " ".join(all_sheets.keys())
         cols_norm = [_norm_colname(str(c)) for c in df.columns]
         if all_sheets:
             for sht_df in all_sheets.values():
                 cols_norm += [_norm_colname(str(c)) for c in sht_df.columns]
-
-        if "線性" in check_text or any("linearity" in c or "r2" in c for c in cols_norm):
-            plot_type = "線性"
-        elif "回收" in check_text or any("回收率" in c or "recovery" in c for c in cols_norm):
-            plot_type = "回收率"
-        elif "RSD" in check_text or "rsd" in check_text.lower() or any("rsd" in c for c in cols_norm):
+        if any("rsd" in c for c in cols_norm):
             plot_type = "%RSD"
-        elif any("10ppb" in c or "15ppb" in c or "20ppb" in c or "25ppb" in c or "30ppb" in c for c in cols_norm):
+        elif any("回收率" in c or "recovery" in c for c in cols_norm):
             plot_type = "回收率"
-
-    if plot_type is None:
-        raise ValueError("無法判斷圖表類型，請在參數中選擇圖表類型")
+        else:
+            plot_type = "線性"
 
     setting = PLOT_SETTINGS[plot_type]
 
-    # --- 格式判斷 ---
-    possible_cols = ["物種", "Species", "species", "Compound", "compound", "化合物"]
-    species_col = None
-    for col in possible_cols:
-        if col in df.columns:
-            species_col = col
-            break
+    # --- 找 5 個物種 sheet ---
+    SPECIES_KEYWORDS = {
+        "Isoprene": "isoprene",
+        "MACR": "macr",
+        "MEK": "mek",
+        "MVK": "mvk",
+        "Monoterpene": "monoterpene",
+    }
 
-    if species_col is not None:
-        # --- 格式 1：單 sheet 含物種欄位 ---
-        if plot_type == "線性":
-            value_col = "Linearity"
-            if value_col not in df.columns:
-                candidates = [c for c in df.columns if "line" in str(c).lower() or "r2" in str(c).lower() or "r\u00b2" in str(c).lower()]
-                if candidates:
-                    value_col = candidates[0]
-                else:
-                    raise ValueError("找不到 Linearity 欄位")
-            df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
-            df = df.dropna(subset=[species_col, value_col])
-            species_order = df[species_col].drop_duplicates().tolist()
-            data_list = [df.loc[df[species_col] == sp, value_col].dropna() for sp in species_order]
-        else:
-            conc_cols = []
-            for target in ["10 ppb", "15 ppb", "20 ppb", "25 ppb", "30 ppb"]:
-                tn = _norm_colname(target)
-                for c in df.columns:
-                    if _norm_colname(c) == tn:
-                        conc_cols.append(c)
-                        break
-            if not conc_cols:
-                conc_cols = [c for c in df.columns if "ppb" in str(c).lower()]
-                conc_cols = sorted(conc_cols)
-            if not conc_cols:
-                raise ValueError(f"找不到濃度欄位（10-30 ppb）。現有欄位：{list(df.columns)}")
-            species_order = df[species_col].drop_duplicates().tolist()
-            data_list = []
-            for sp in species_order:
-                sub_df = df[df[species_col] == sp]
-                values = []
-                for col in conc_cols:
-                    vals = pd.to_numeric(sub_df[col], errors="coerce").dropna()
-                    values.extend(vals.tolist())
-                data_list.append(values)
-            total_points = sum(len(d) for d in data_list)
-            if total_points == 0:
-                raise ValueError(f"所有物種都沒有有效數值。濃度欄位：{conc_cols}，物種：{species_order}")
+    species_data = {}  # {species_name: sheet_df}
 
-    elif all_sheets and len(all_sheets) > 1:
-        # --- 格式 2：多 sheet，每個 sheet = 一個物種 ---
+    if all_sheets:
+        for sht_name, sht_df in all_sheets.items():
+            sht_lower = sht_name.lower()
+            for sp_display, sp_key in SPECIES_KEYWORDS.items():
+                if sp_key in sht_lower and sp_display not in species_data:
+                    species_data[sp_display] = sht_df
+                    break
+    else:
+        # fallback：單一 sheet
+        if len(dfs) > 0:
+            species_data["Unknown"] = df
+
+    if not species_data:
+        raise ValueError("找不到物種工作表（Isoprene/MACR/MEK/MVK/MONOTERPENE calibr.）")
+
+    # --- 依圖表類型提取數值 ---
+    if plot_type == "線性":
+        # 線性：用 理論濃度 vs 真實濃度 做散布圖 + R²
+        fig, ax = plt.subplots(figsize=FIGSIZE, dpi=DPI)
+
+        for i, (sp_name, sht_df) in enumerate(species_data.items()):
+            # 找理論濃度和真實濃度欄位
+            theo_col = None
+            real_col = None
+            for c in sht_df.columns:
+                cs = str(c)
+                cn = _norm_colname(c)
+                if "理論濃度" in cs or "theoretical" in cn or "theory" in cn:
+                    theo_col = c
+                if "真實濃度" in cs or "actual" in cn or "true" in cn or "real" in cn:
+                    real_col = c
+
+            if theo_col is None or real_col is None:
+                continue
+
+            theo_vals = pd.to_numeric(sht_df[theo_col], errors="coerce")
+            real_vals = pd.to_numeric(sht_df[real_col], errors="coerce")
+            valid = theo_vals.notna() & real_vals.notna()
+
+            if valid.sum() < 2:
+                continue
+
+            x = theo_vals[valid].values
+            y = real_vals[valid].values
+
+            # 散布圖
+            ax.scatter(x, y, s=60, color=COLORS[i % len(COLORS)], alpha=0.7, label=sp_name, zorder=4)
+
+            # 線性回歸
+            if len(x) >= 2:
+                slope, intercept = np.polyfit(x, y, 1)
+                x_line = np.array([x.min(), x.max()])
+                y_line = slope * x_line + intercept
+                ax.plot(x_line, y_line, color=COLORS[i % len(COLORS)], linewidth=2, alpha=0.8, zorder=3)
+
+                # R²
+                corr = np.corrcoef(x, y)[0, 1]
+                r_squared = corr ** 2
+                # 在圖上標 R²
+                x_pos = x.min() + (x.max() - x.min()) * 0.05
+                y_pos = y.min() + (y.max() - y.min()) * (0.95 - i * 0.08)
+                ax.text(x_pos, y_pos, f"{sp_name}: R\u00b2 = {r_squared:.4f}",
+                        fontsize=16, color=COLORS[i % len(COLORS)], fontweight="bold",
+                        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+
+        ax.set_xlabel(setting["xlabel"], fontsize=LABEL_FS, fontweight="bold", labelpad=14)
+        ax.set_ylabel(setting["ylabel"], fontsize=LABEL_FS, fontweight="bold", labelpad=14)
+        ax.legend(fontsize=16, loc="upper left")
+        ax.tick_params(axis="x", labelsize=TICK_FS, width=1.8, length=6)
+        ax.tick_params(axis="y", labelsize=TICK_FS, width=1.8, length=6)
+        ax.grid(True, linestyle="--", linewidth=1.2, alpha=0.3)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_linewidth(1.8)
+        ax.spines["bottom"].set_linewidth(1.8)
+
+        # Y 軸控制
+        y_max_custom = params.get("y_max", 0)
+        y_tick_custom = params.get("y_tick", 0)
+        if y_max_custom and y_max_custom > 0:
+            ax.set_ylim(0, y_max_custom)
+        if y_tick_custom and y_tick_custom > 0:
+            from matplotlib.ticker import MultipleLocator
+            ax.yaxis.set_major_locator(MultipleLocator(y_tick_custom))
+
+        plt.tight_layout()
+        return fig
+
+    else:
+        # --- RSD / 回收率：盒鬚圖 ---
         species_order = []
         data_list = []
 
-        for sht_name, sht_df in all_sheets.items():
-            # 物種名 = sheet 名的第一個字
-            sp_name = sht_name.split()[0] if sht_name.strip() else sht_name
-            sp_lower = sp_name.lower()
-
-            # 過濾非物種 sheet（只保留含已知物種名稱的 sheet）
-            is_species = any(sp in sp_lower for sp in KNOWN_SPECIES)
-            if not is_species:
+        for sp_name in SPECIES_KEYWORDS.keys():
+            if sp_name not in species_data:
                 continue
+            sht_df = species_data[sp_name]
 
-            # 找數值欄位
+            # 找欄位
             value_col = None
             if plot_type == "回收率":
                 for c in sht_df.columns:
+                    cs = str(c)
                     cn = _norm_colname(c)
-                    if "回收率" in str(c) or "recovery" in cn:
+                    if "回收率" in cs or "recovery" in cn:
                         value_col = c
                         break
             elif plot_type == "%RSD":
@@ -570,35 +603,6 @@ def plot_b01_calibration_boxplot(dfs, params):
                     if "rsd" in cn:
                         value_col = c
                         break
-            elif plot_type == "線性":
-                # 線性：找 Linearity, R2, R², 線性 等欄位
-                for c in sht_df.columns:
-                    cn = _norm_colname(c)
-                    cs = str(c).lower()
-                    if "linearity" in cn or "r2" in cn or "r\u00b2" in cs or "線性" in str(c) or "r\u00b2" in cn:
-                        value_col = c
-                        break
-                # 如果找不到專用欄位，嘗試從理論濃度+真實濃度算 R²
-                if value_col is None:
-                    theo_col = None
-                    real_col = None
-                    for c in sht_df.columns:
-                        cn = _norm_colname(c)
-                        if "理論濃度" in str(c) or "theoretical" in cn or "theory" in cn:
-                            theo_col = c
-                        if "真實濃度" in str(c) or "actual" in cn or "true" in cn or "real" in cn:
-                            real_col = c
-                    if theo_col and real_col:
-                        # 計算 R²
-                        theo_vals = pd.to_numeric(sht_df[theo_col], errors="coerce")
-                        real_vals = pd.to_numeric(sht_df[real_col], errors="coerce")
-                        valid = theo_vals.notna() & real_vals.notna()
-                        if valid.sum() >= 2:
-                            corr = theo_vals[valid].corr(real_vals[valid])
-                            r_squared = corr ** 2
-                            species_order.append(sp_name)
-                            data_list.append([r_squared])
-                            continue
 
             if value_col is None:
                 continue
@@ -609,91 +613,52 @@ def plot_b01_calibration_boxplot(dfs, params):
                 data_list.append(vals.tolist())
 
         if not species_order:
-            raise ValueError(f"在所有工作表中找不到 {plot_type} 相關欄位。請確認欄位名稱包含 '回收率'/'RSD'/'Linearity'/'R2'/'R\u00b2' 或 '理論濃度'+'真實濃度'。")
+            if plot_type == "回收率":
+                raise ValueError("找不到「回收率」欄位。請確認每個工作表都有回收率欄位。")
+            else:
+                raise ValueError("找不到「RSD」欄位。請確認每個工作表都有 RSD 欄位。")
 
-    else:
-        # --- fallback：只有一個 sheet ---
-        if sheet_name:
-            species_name = sheet_name.split()[0]
+        fig, ax = plt.subplots(figsize=FIGSIZE, dpi=DPI)
+        bp = ax.boxplot(data_list, tick_labels=species_order, patch_artist=True, widths=0.55,
+                        showfliers=False, medianprops=dict(color="black", linewidth=2.4),
+                        boxprops=dict(linewidth=2.0), whiskerprops=dict(linewidth=2.0),
+                        capprops=dict(linewidth=2.0))
+        for i, patch in enumerate(bp["boxes"]):
+            patch.set_facecolor(COLORS[i % len(COLORS)])
+            patch.set_alpha(0.9)
+
+        for line in setting["qc_lines"]:
+            ax.axhline(line, color="gray", linestyle="--", linewidth=2.4, alpha=0.9)
+
+        ax.set_ylabel(setting["ylabel"], fontsize=LABEL_FS, fontweight="bold", labelpad=14)
+        ax.set_xlabel(setting["xlabel"], fontsize=LABEL_FS, fontweight="bold", labelpad=18)
+
+        # Y 軸控制
+        y_max_custom = params.get("y_max", 0)
+        y_tick_custom = params.get("y_tick", 0)
+        if y_max_custom and y_max_custom > 0:
+            ax.set_ylim(0, y_max_custom)
         else:
-            species_name = "Unknown"
+            ax.set_ylim(setting["ylim"])
 
-        if plot_type == "回收率":
-            value_col = None
-            for c in df.columns:
-                cn = _norm_colname(c)
-                if "回收率" in str(c) or "recovery" in cn:
-                    value_col = c
-                    break
-            if value_col is None:
-                raise ValueError(f"找不到回收率欄位。現有欄位：{list(df.columns)}")
-        elif plot_type == "%RSD":
-            value_col = None
-            for c in df.columns:
-                cn = _norm_colname(c)
-                if "rsd" in cn:
-                    value_col = c
-                    break
-            if value_col is None:
-                raise ValueError(f"找不到 RSD 欄位。現有欄位：{list(df.columns)}")
-        elif plot_type == "線性":
-            value_col = None
-            for c in df.columns:
-                cn = _norm_colname(c)
-                cs = str(c).lower()
-                if "linearity" in cn or "r2" in cn or "r\u00b2" in cs or "線性" in str(c):
-                    value_col = c
-                    break
-            if value_col is None:
-                raise ValueError(f"找不到 Linearity/R\u00b2 欄位。現有欄位：{list(df.columns)}")
-        else:
-            raise ValueError("無法判斷圖表類型，且找不到物種欄位。")
+        if y_tick_custom and y_tick_custom > 0:
+            from matplotlib.ticker import MultipleLocator
+            ax.yaxis.set_major_locator(MultipleLocator(y_tick_custom))
 
-        df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
-        data_list = [df[value_col].dropna().tolist()]
-        species_order = [species_name]
+        ax.tick_params(axis="x", labelsize=TICK_FS, rotation=20, width=1.8, length=6)
+        ax.tick_params(axis="y", labelsize=TICK_FS, width=1.8, length=6)
+        ax.grid(axis="y", linestyle="--", linewidth=1.2, alpha=0.3)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_linewidth(1.8)
+        ax.spines["bottom"].set_linewidth(1.8)
+        plt.tight_layout()
 
-    # --- 畫圖 ---
-    fig, ax = plt.subplots(figsize=FIGSIZE, dpi=DPI)
-    bp = ax.boxplot(data_list, tick_labels=species_order, patch_artist=True, widths=0.55,
-                    showfliers=False, medianprops=dict(color="black", linewidth=2.4),
-                    boxprops=dict(linewidth=2.0), whiskerprops=dict(linewidth=2.0), capprops=dict(linewidth=2.0))
-    for i, patch in enumerate(bp["boxes"]):
-        patch.set_facecolor(COLORS[i % len(COLORS)])
-        patch.set_alpha(0.9)
-
-    for line in setting["qc_lines"]:
-        color = "#C00000" if plot_type == "線性" else "gray"
-        ax.axhline(line, color=color, linestyle="--", linewidth=2.4, alpha=0.9)
-
-    ax.set_ylabel(setting["ylabel"], fontsize=LABEL_FS, fontweight="bold", labelpad=14)
-    ax.set_xlabel(setting["xlabel"], fontsize=LABEL_FS, fontweight="bold", labelpad=18)
-
-    # Y 軸控制
-    y_max_custom = params.get("y_max", 0)
-    y_tick_custom = params.get("y_tick", 0)
-    if y_max_custom and y_max_custom > 0:
-        ax.set_ylim(0, y_max_custom)
-    else:
-        ax.set_ylim(setting["ylim"])
-
-    if y_tick_custom and y_tick_custom > 0:
-        from matplotlib.ticker import MultipleLocator
-        ax.yaxis.set_major_locator(MultipleLocator(y_tick_custom))
-
-    ax.tick_params(axis="x", labelsize=TICK_FS, rotation=20, width=1.8, length=6)
-    ax.tick_params(axis="y", labelsize=TICK_FS, width=1.8, length=6)
-    ax.grid(axis="y", linestyle="--", linewidth=1.2, alpha=0.3)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.spines["left"].set_linewidth(1.8)
-    ax.spines["bottom"].set_linewidth(1.8)
-    plt.tight_layout()
-
-    return fig
+        return fig
 
 register("B-01", "檢量盒鬚圖（線性/回收率/RSD）", "儀器QC",
-        "五物種盒鬚圖比較，自動讀取所有工作表（每個sheet=一個物種），或單sheet含物種欄位", plot_b01_calibration_boxplot, needs_files=1)
+        "讀取5物種工作表(Isoprene/MACR/MEK/MVK/MONOTERPENE calibr.)，RSD/回收率做盒鬚圖，線性做散布圖+R²", plot_b01_calibration_boxplot, needs_files=1)
+
 
 
 
