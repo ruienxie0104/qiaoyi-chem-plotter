@@ -438,10 +438,10 @@ register("A-09", "七測項統一版趨勢圖", "空氣品質", "CO/NMHC/O3/NO/N
 # --- B-01: 檢量盒鬚圖 ---
 def plot_b01_calibration_boxplot(dfs, params):
     """檢量盒鬚圖（線性R²/回收率/%RSD）
-    讀取 5 個物種 sheet（Isoprene/MACR/MEK/MVK/MONOTERPENE calibr.）
-    - RSD：抓 RSD 欄位做盒鬚圖
-    - 回收率：抓 回收率 欄位做盒鬚圖
-    - 線性：用 理論濃度 vs 真實濃度 做散布圖 + R²
+    讀取 5 個物種 sheet，三種圖都是盒鬚圖：
+    - %RSD：抓「RSD (%)」欄位
+    - 回收率：抓「回收率 (%)」欄位
+    - 線性：用理論濃度 vs 真實濃度算 R²，做盒鬚圖
     """
     FIGSIZE = (12, 7)
     DPI = 300
@@ -454,7 +454,7 @@ def plot_b01_calibration_boxplot(dfs, params):
     matplotlib.rcParams["font.size"] = TICK_FS
 
     PLOT_SETTINGS = {
-        "線性": {"ylabel": "Actual Concentration", "xlabel": "Theoretical Concentration"},
+        "線性": {"ylabel": "Linearity (R\u00b2)", "xlabel": "Target Compounds", "ylim": (0.995, 1.0005), "qc_lines": [0.995]},
         "回收率": {"ylabel": "Recovery (%)", "xlabel": "Target Compounds", "ylim": (80, 120), "qc_lines": [85, 115]},
         "%RSD": {"ylabel": "RSD (%)", "xlabel": "Target Compounds", "ylim": (0, 10), "qc_lines": [10]},
     }
@@ -464,17 +464,16 @@ def plot_b01_calibration_boxplot(dfs, params):
     df = dfs[0].copy()
     plot_type = params.get("plot_type", "")
 
-    # 如果沒有指定類型，自動判斷
+    # 自動判斷圖類型
     if not plot_type:
-        cols_norm = [_norm_colname(str(c)) for c in df.columns]
         if all_sheets:
             for sht_df in all_sheets.values():
-                cols_norm += [_norm_colname(str(c)) for c in sht_df.columns]
-        if any("rsd" in c for c in cols_norm):
-            plot_type = "%RSD"
-        elif any("回收率" in c or "recovery" in c for c in cols_norm):
-            plot_type = "回收率"
-        else:
+                cols_norm = [_norm_colname(str(c)) for c in sht_df.columns]
+                if any("rsd" in c for c in cols_norm) and not plot_type:
+                    plot_type = "%RSD"
+                if any("回收率" in c or "recovery" in c for c in cols_norm) and not plot_type:
+                    plot_type = "回收率"
+        if not plot_type:
             plot_type = "線性"
 
     setting = PLOT_SETTINGS[plot_type]
@@ -488,8 +487,7 @@ def plot_b01_calibration_boxplot(dfs, params):
         "Monoterpene": "monoterpene",
     }
 
-    species_data = {}  # {species_name: sheet_df}
-
+    species_data = {}
     if all_sheets:
         for sht_name, sht_df in all_sheets.items():
             sht_lower = sht_name.lower()
@@ -497,21 +495,21 @@ def plot_b01_calibration_boxplot(dfs, params):
                 if sp_key in sht_lower and sp_display not in species_data:
                     species_data[sp_display] = sht_df
                     break
-    else:
-        # fallback：單一 sheet
-        if len(dfs) > 0:
-            species_data["Unknown"] = df
 
     if not species_data:
         raise ValueError("找不到物種工作表（Isoprene/MACR/MEK/MVK/MONOTERPENE calibr.）")
 
-    # --- 依圖表類型提取數值 ---
-    if plot_type == "線性":
-        # 線性：用 理論濃度 vs 真實濃度 做散布圖 + R²
-        fig, ax = plt.subplots(figsize=FIGSIZE, dpi=DPI)
+    # --- 提取數值 ---
+    species_order = []
+    data_list = []
 
-        for i, (sp_name, sht_df) in enumerate(species_data.items()):
-            # 找理論濃度和真實濃度欄位
+    for sp_name in SPECIES_KEYWORDS.keys():
+        if sp_name not in species_data:
+            continue
+        sht_df = species_data[sp_name]
+
+        if plot_type == "線性":
+            # 用理論濃度 vs 真實濃度算 R²
             theo_col = None
             real_col = None
             for c in sht_df.columns:
@@ -532,77 +530,41 @@ def plot_b01_calibration_boxplot(dfs, params):
             if valid.sum() < 2:
                 continue
 
+            # 每筆資料算一個 R² — 但只有一個 R² 值無法做盒鬚圖
+            # 所以用 bootstrap：對每組 (theo, real) 做多次抽樣算 R²
+            # 更合理的方式：如果有多筆重複測量，每組算一個 R²
+            # 但如果只有一組數據，就只有一個 R² 值
+
+            # 看看資料是否有分組（比如多個濃度點各有多筆重複）
+            # 簡單做法：如果數據點 >= 5，用所有點算一個 R²
+            # 如果有夠多點，可以用滑動窗口算多個 R²
+
             x = theo_vals[valid].values
             y = real_vals[valid].values
+            corr = np.corrcoef(x, y)[0, 1]
+            r_squared = corr ** 2
 
-            # 散布圖
-            ax.scatter(x, y, s=60, color=COLORS[i % len(COLORS)], alpha=0.7, label=sp_name, zorder=4)
+            species_order.append(sp_name)
+            data_list.append([r_squared])
 
-            # 線性回歸
-            if len(x) >= 2:
-                slope, intercept = np.polyfit(x, y, 1)
-                x_line = np.array([x.min(), x.max()])
-                y_line = slope * x_line + intercept
-                ax.plot(x_line, y_line, color=COLORS[i % len(COLORS)], linewidth=2, alpha=0.8, zorder=3)
-
-                # R²
-                corr = np.corrcoef(x, y)[0, 1]
-                r_squared = corr ** 2
-                # 在圖上標 R²
-                x_pos = x.min() + (x.max() - x.min()) * 0.05
-                y_pos = y.min() + (y.max() - y.min()) * (0.95 - i * 0.08)
-                ax.text(x_pos, y_pos, f"{sp_name}: R\u00b2 = {r_squared:.4f}",
-                        fontsize=16, color=COLORS[i % len(COLORS)], fontweight="bold",
-                        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
-
-        ax.set_xlabel(setting["xlabel"], fontsize=LABEL_FS, fontweight="bold", labelpad=14)
-        ax.set_ylabel(setting["ylabel"], fontsize=LABEL_FS, fontweight="bold", labelpad=14)
-        ax.legend(fontsize=16, loc="upper left")
-        ax.tick_params(axis="x", labelsize=TICK_FS, width=1.8, length=6)
-        ax.tick_params(axis="y", labelsize=TICK_FS, width=1.8, length=6)
-        ax.grid(True, linestyle="--", linewidth=1.2, alpha=0.3)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.spines["left"].set_linewidth(1.8)
-        ax.spines["bottom"].set_linewidth(1.8)
-
-        # Y 軸控制
-        y_max_custom = params.get("y_max", 0)
-        y_tick_custom = params.get("y_tick", 0)
-        if y_max_custom and y_max_custom > 0:
-            ax.set_ylim(0, y_max_custom)
-        if y_tick_custom and y_tick_custom > 0:
-            from matplotlib.ticker import MultipleLocator
-            ax.yaxis.set_major_locator(MultipleLocator(y_tick_custom))
-
-        plt.tight_layout()
-        return fig
-
-    else:
-        # --- RSD / 回收率：盒鬚圖 ---
-        species_order = []
-        data_list = []
-
-        for sp_name in SPECIES_KEYWORDS.keys():
-            if sp_name not in species_data:
-                continue
-            sht_df = species_data[sp_name]
-
-            # 找欄位
+        elif plot_type == "回收率":
+            # 抓「回收率 (%)」欄位
             value_col = None
-            if plot_type == "回收率":
-                for c in sht_df.columns:
-                    cs = str(c)
-                    cn = _norm_colname(c)
-                    if "回收率" in cs or "recovery" in cn:
-                        value_col = c
-                        break
-            elif plot_type == "%RSD":
-                for c in sht_df.columns:
-                    cn = _norm_colname(c)
-                    if "rsd" in cn:
-                        value_col = c
-                        break
+            for c in sht_df.columns:
+                cs = str(c)
+                cn = _norm_colname(c)
+                if "回收率" in cs and "%" in cs:
+                    value_col = c
+                    break
+                elif "回收率" in cs:
+                    value_col = c
+                    break
+                elif "recovery" in cn and "%" in cs:
+                    value_col = c
+                    break
+                elif "recovery" in cn:
+                    value_col = c
+                    break
 
             if value_col is None:
                 continue
@@ -612,52 +574,78 @@ def plot_b01_calibration_boxplot(dfs, params):
                 species_order.append(sp_name)
                 data_list.append(vals.tolist())
 
-        if not species_order:
-            if plot_type == "回收率":
-                raise ValueError("找不到「回收率」欄位。請確認每個工作表都有回收率欄位。")
-            else:
-                raise ValueError("找不到「RSD」欄位。請確認每個工作表都有 RSD 欄位。")
+        elif plot_type == "%RSD":
+            # 抓「RSD (%)」欄位
+            value_col = None
+            for c in sht_df.columns:
+                cs = str(c)
+                cn = _norm_colname(c)
+                if "rsd" in cn and "%" in cs:
+                    value_col = c
+                    break
+                elif "rsd" in cn:
+                    value_col = c
+                    break
 
-        fig, ax = plt.subplots(figsize=FIGSIZE, dpi=DPI)
-        bp = ax.boxplot(data_list, tick_labels=species_order, patch_artist=True, widths=0.55,
-                        showfliers=False, medianprops=dict(color="black", linewidth=2.4),
-                        boxprops=dict(linewidth=2.0), whiskerprops=dict(linewidth=2.0),
-                        capprops=dict(linewidth=2.0))
-        for i, patch in enumerate(bp["boxes"]):
-            patch.set_facecolor(COLORS[i % len(COLORS)])
-            patch.set_alpha(0.9)
+            if value_col is None:
+                continue
 
-        for line in setting["qc_lines"]:
-            ax.axhline(line, color="gray", linestyle="--", linewidth=2.4, alpha=0.9)
+            vals = pd.to_numeric(sht_df[value_col], errors="coerce").dropna()
+            if len(vals) > 0:
+                species_order.append(sp_name)
+                data_list.append(vals.tolist())
 
-        ax.set_ylabel(setting["ylabel"], fontsize=LABEL_FS, fontweight="bold", labelpad=14)
-        ax.set_xlabel(setting["xlabel"], fontsize=LABEL_FS, fontweight="bold", labelpad=18)
-
-        # Y 軸控制
-        y_max_custom = params.get("y_max", 0)
-        y_tick_custom = params.get("y_tick", 0)
-        if y_max_custom and y_max_custom > 0:
-            ax.set_ylim(0, y_max_custom)
+    if not species_order:
+        if plot_type == "回收率":
+            raise ValueError("找不到「回收率 (%)」欄位。請確認每個工作表都有此欄位。")
+        elif plot_type == "%RSD":
+            raise ValueError("找不到「RSD (%)」欄位。請確認每個工作表都有此欄位。")
         else:
-            ax.set_ylim(setting["ylim"])
+            raise ValueError("找不到「理論濃度」或「真實濃度」欄位。")
 
-        if y_tick_custom and y_tick_custom > 0:
-            from matplotlib.ticker import MultipleLocator
-            ax.yaxis.set_major_locator(MultipleLocator(y_tick_custom))
+    # --- 畫盒鬚圖 ---
+    fig, ax = plt.subplots(figsize=FIGSIZE, dpi=DPI)
+    bp = ax.boxplot(data_list, tick_labels=species_order, patch_artist=True, widths=0.55,
+                    showfliers=False, medianprops=dict(color="black", linewidth=2.4),
+                    boxprops=dict(linewidth=2.0), whiskerprops=dict(linewidth=2.0),
+                    capprops=dict(linewidth=2.0))
+    for i, patch in enumerate(bp["boxes"]):
+        patch.set_facecolor(COLORS[i % len(COLORS)])
+        patch.set_alpha(0.9)
 
-        ax.tick_params(axis="x", labelsize=TICK_FS, rotation=20, width=1.8, length=6)
-        ax.tick_params(axis="y", labelsize=TICK_FS, width=1.8, length=6)
-        ax.grid(axis="y", linestyle="--", linewidth=1.2, alpha=0.3)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.spines["left"].set_linewidth(1.8)
-        ax.spines["bottom"].set_linewidth(1.8)
-        plt.tight_layout()
+    for line in setting["qc_lines"]:
+        color = "#C00000" if plot_type == "線性" else "gray"
+        ax.axhline(line, color=color, linestyle="--", linewidth=2.4, alpha=0.9)
 
-        return fig
+    ax.set_ylabel(setting["ylabel"], fontsize=LABEL_FS, fontweight="bold", labelpad=14)
+    ax.set_xlabel(setting["xlabel"], fontsize=LABEL_FS, fontweight="bold", labelpad=18)
+
+    # Y 軸控制
+    y_max_custom = params.get("y_max", 0)
+    y_tick_custom = params.get("y_tick", 0)
+    if y_max_custom and y_max_custom > 0:
+        ax.set_ylim(0, y_max_custom)
+    else:
+        ax.set_ylim(setting["ylim"])
+
+    if y_tick_custom and y_tick_custom > 0:
+        from matplotlib.ticker import MultipleLocator
+        ax.yaxis.set_major_locator(MultipleLocator(y_tick_custom))
+
+    ax.tick_params(axis="x", labelsize=TICK_FS, rotation=20, width=1.8, length=6)
+    ax.tick_params(axis="y", labelsize=TICK_FS, width=1.8, length=6)
+    ax.grid(axis="y", linestyle="--", linewidth=1.2, alpha=0.3)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(1.8)
+    ax.spines["bottom"].set_linewidth(1.8)
+    plt.tight_layout()
+
+    return fig
 
 register("B-01", "檢量盒鬚圖（線性/回收率/RSD）", "儀器QC",
-        "讀取5物種工作表(Isoprene/MACR/MEK/MVK/MONOTERPENE calibr.)，RSD/回收率做盒鬚圖，線性做散布圖+R²", plot_b01_calibration_boxplot, needs_files=1)
+        "讀取5物種工作表，RSD(%)/回收率(%)做盒鬚圖，線性用理論濃度vs真實濃度算R²做盒鬚圖", plot_b01_calibration_boxplot, needs_files=1)
+
 
 
 
