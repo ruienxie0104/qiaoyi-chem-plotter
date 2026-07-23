@@ -479,19 +479,20 @@ def plot_b01_calibration_boxplot(dfs, params):
     setting = PLOT_SETTINGS[plot_type]
 
     # --- 找 5 個物種 sheet ---
-    SPECIES_KEYWORDS = {
-        "Isoprene": "isoprene",
-        "MACR": "macr",
-        "MEK": "mek",
-        "MVK": "mvk",
-        "Monoterpene": "monoterpene",
+    # sheet 名稱格式：Isoprene calibr. / MACR calibr. / MEK calibr. / MVK calibr. / MONOTERPENE calibr.
+    SPECIES_SHEET_NAMES = {
+        "Isoprene": "isoprene calibr",
+        "MACR": "macr calibr",
+        "MEK": "mek calibr",
+        "MVK": "mvk calibr",
+        "Monoterpene": "monoterpene calibr",
     }
 
     species_data = {}
     if all_sheets:
         for sht_name, sht_df in all_sheets.items():
-            sht_lower = sht_name.lower()
-            for sp_display, sp_key in SPECIES_KEYWORDS.items():
+            sht_lower = sht_name.lower().strip()
+            for sp_display, sp_key in SPECIES_SHEET_NAMES.items():
                 if sp_key in sht_lower and sp_display not in species_data:
                     species_data[sp_display] = sht_df
                     break
@@ -503,7 +504,7 @@ def plot_b01_calibration_boxplot(dfs, params):
     species_order = []
     data_list = []
 
-    for sp_name in SPECIES_KEYWORDS.keys():
+    for sp_name in SPECIES_SHEET_NAMES.keys():
         if sp_name not in species_data:
             continue
         sht_df = species_data[sp_name]
