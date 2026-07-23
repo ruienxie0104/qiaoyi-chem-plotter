@@ -203,22 +203,7 @@ for tab, cat in zip(tabs, cat_names):
                             "%RSD": "%RSD"
                         }
                         params["plot_type"] = type_map.get(selected_type, "")
-
-                        if uploaded_files:
-                            try:
-                                file_bytes = uploaded_files[0].getvalue()
-                                xl = pd.ExcelFile(io.BytesIO(file_bytes), engine="openpyxl")
-                                sheet_names = xl.sheet_names
-                                xl.close()
-                                if len(sheet_names) > 1:
-                                    selected_sheet = st.selectbox(
-                                        "選擇工作表",
-                                        sheet_names,
-                                        key=f"sheet_{key_prefix}"
-                                    )
-                                    params["sheet_name"] = selected_sheet
-                            except Exception:
-                                pass
+                        st.info("📋 B-01 會自動讀取所有工作表，每個 sheet 視為一個物種")
 
                 # --- 生成按鈕 ---
                 btn_label = "📥 合併並篩選" if plot_id == "B-08" else "🎨 生成圖表"
@@ -268,6 +253,14 @@ for tab, cat in zip(tabs, cat_names):
                                                     except Exception:
                                                         raise ValueError(f"無法讀取檔案 {f.name}：{excel_err}")
                                     dfs.append(df)
+
+                                # B-01: 讀取所有 sheet，傳給函數
+                                if plot_id == "B-01":
+                                    try:
+                                        all_sheets = pd.read_excel(io.BytesIO(uploaded_files[0].getvalue()), sheet_name=None, engine="openpyxl")
+                                        params["all_sheets"] = all_sheets
+                                    except Exception:
+                                        params["all_sheets"] = None
 
                                 plot_info = get_plot_by_id(plot_id)
                                 result = plot_info["func"](dfs, params)

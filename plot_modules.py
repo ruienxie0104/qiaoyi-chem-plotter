@@ -440,7 +440,7 @@ def plot_b01_calibration_boxplot(dfs, params):
     """檢量盒鬚圖（線性R²/回收率/%RSD）
     支援兩種 Excel 格式：
     1. 單 sheet 含物種欄位（物種/Species/Compound）
-    2. 多 sheet，每個 sheet 名稱 = 物種名，欄位含理論濃度/真實濃度/RSD/回收率等
+    2. 多 sheet，每個 sheet 名稱 = 物種名，自動讀取所有 sheet 一起比較
     """
     FIGSIZE = (12, 7)
     DPI = 300
@@ -454,40 +454,43 @@ def plot_b01_calibration_boxplot(dfs, params):
     matplotlib.rcParams["font.size"] = TICK_FS
 
     PLOT_SETTINGS = {
-        "線性": {"ylabel": "Linearity (R²)", "xlabel": "Target Compounds", "ylim": (0.995, 1.0005), "qc_lines": [0.995]},
+        "線性": {"ylabel": "Linearity (R\u00b2)", "xlabel": "Target Compounds", "ylim": (0.995, 1.0005), "qc_lines": [0.995]},
         "回收率": {"ylabel": "Recovery (%)", "xlabel": "Target Compounds", "ylim": (80, 120), "qc_lines": [85, 115]},
         "%RSD": {"ylabel": "RSD (%)", "xlabel": "Target Compounds", "ylim": (0, 10), "qc_lines": [10]},
     }
 
+    # --- 取得所有 sheet ---
+    all_sheets = params.get("all_sheets", None)
     df = dfs[0].copy()
-
-    # 自動判斷圖類型
     sheet_name = params.get("sheet_name", "")
     plot_type = params.get("plot_type", "")
+
+    # 自動判斷圖類型
     if not plot_type:
-        if "線性" in sheet_name:
+        # 從所有 sheet 名稱或欄位判斷
+        check_text = sheet_name
+        if all_sheets:
+            check_text += " " + " ".join(all_sheets.keys())
+        cols_norm = [_norm_colname(str(c)) for c in df.columns]
+        if all_sheets:
+            for sht_df in all_sheets.values():
+                cols_norm += [_norm_colname(str(c)) for c in sht_df.columns]
+
+        if "線性" in check_text or any("linearity" in c or "r2" in c or "r\u00b2" in c.lower() for c in cols_norm):
             plot_type = "線性"
-        elif "回收" in sheet_name:
+        elif "回收" in check_text or any("回收率" in c or "recovery" in c for c in cols_norm):
             plot_type = "回收率"
-        elif "RSD" in sheet_name or "rsd" in sheet_name:
+        elif "RSD" in check_text or "rsd" in check_text.lower() or any("rsd" in c for c in cols_norm):
             plot_type = "%RSD"
-        else:
-            cols_norm = [_norm_colname(str(c)) for c in df.columns]
-            if any("linearity" in c or "r2" in c or "r²" in c.lower() for c in cols_norm):
-                plot_type = "線性"
-            elif any("10ppb" in c or "15ppb" in c or "20ppb" in c or "25ppb" in c or "30ppb" in c for c in cols_norm):
-                plot_type = "回收率"
-            elif any("rsd" in c for c in cols_norm):
-                plot_type = "%RSD"
-            elif any("回收率" in c or "recovery" in c for c in cols_norm):
-                plot_type = "回收率"
+        elif any("10ppb" in c or "15ppb" in c or "20ppb" in c or "25ppb" in c or "30ppb" in c for c in cols_norm):
+            plot_type = "回收率"
 
     if plot_type is None:
         raise ValueError("無法判斷圖表類型，請在參數中選擇圖表類型")
 
     setting = PLOT_SETTINGS[plot_type]
 
-    # --- 判斷資料格式 ---
+    # --- 格式判斷 ---
     possible_cols = ["物種", "Species", "species", "Compound", "compound", "化合物"]
     species_col = None
     for col in possible_cols:
@@ -500,7 +503,7 @@ def plot_b01_calibration_boxplot(dfs, params):
         if plot_type == "線性":
             value_col = "Linearity"
             if value_col not in df.columns:
-                candidates = [c for c in df.columns if "line" in str(c).lower() or "r2" in str(c).lower() or "r²" in str(c).lower()]
+                candidates = [c for c in df.columns if "line" in str(c).lower() or "r2" in str(c).lower() or "r\u00b2" in str(c).lower()]
                 if candidates:
                     value_col = candidates[0]
                 else:
@@ -534,8 +537,55 @@ def plot_b01_calibration_boxplot(dfs, params):
             total_points = sum(len(d) for d in data_list)
             if total_points == 0:
                 raise ValueError(f"所有物種都沒有有效數值。濃度欄位：{conc_cols}，物種：{species_order}")
-    else:
+
+    elif all_sheets and len(all_sheets) > 1:
         # --- 格式 2：多 sheet，每個 sheet = 一個物種 ---
+        species_order = []
+        data_list = []
+
+        for sht_name, sht_df in all_sheets.items():
+            # 物種名 = sheet 名的第一個字（e.g. "Isoprene calibr. 0521" -> "Isoprene"）
+            sp_name = sht_name.split()[0] if sht_name.strip() else sht_name
+
+            # 找數值欄位
+            if plot_type == "回收率":
+                value_col = None
+                for c in sht_df.columns:
+                    cn = _norm_colname(c)
+                    if "回收率" in str(c) or "recovery" in cn:
+                        value_col = c
+                        break
+            elif plot_type == "%RSD":
+                value_col = None
+                for c in sht_df.columns:
+                    cn = _norm_colname(c)
+                    if "rsd" in cn:
+                        value_col = c
+                        break
+            elif plot_type == "線性":
+                value_col = None
+                for c in sht_df.columns:
+                    cn = _norm_colname(c)
+                    if "linearity" in cn or "r2" in cn or "r\u00b2" in cn:
+                        value_col = c
+                        break
+            else:
+                continue
+
+            if value_col is None:
+                # 跳過找不到欄位的 sheet（可能是非數據 sheet）
+                continue
+
+            vals = pd.to_numeric(sht_df[value_col], errors="coerce").dropna()
+            if len(vals) > 0:
+                species_order.append(sp_name)
+                data_list.append(vals.tolist())
+
+        if not species_order:
+            raise ValueError(f"在所有工作表中找不到 {plot_type} 相關欄位。請確認欄位名稱。")
+
+    else:
+        # --- 格式 2 fallback：只有一個 sheet，用 sheet 名當物種 ---
         if sheet_name:
             species_name = sheet_name.split()[0]
         else:
@@ -563,21 +613,19 @@ def plot_b01_calibration_boxplot(dfs, params):
             value_col = None
             for c in df.columns:
                 cn = _norm_colname(c)
-                if "linearity" in cn or "r2" in cn or "r²" in cn:
+                if "linearity" in cn or "r2" in cn or "r\u00b2" in cn:
                     value_col = c
                     break
             if value_col is None:
-                raise ValueError(f"找不到 Linearity/R² 欄位。現有欄位：{list(df.columns)}")
+                raise ValueError(f"找不到 Linearity/R\u00b2 欄位。現有欄位：{list(df.columns)}")
         else:
-            raise ValueError("無法判斷圖表類型，且找不到物種欄位。請選擇圖表類型或確認資料格式。")
+            raise ValueError("無法判斷圖表類型，且找不到物種欄位。")
 
         df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
         data_list = [df[value_col].dropna().tolist()]
         species_order = [species_name]
-        total_points = sum(len(d) for d in data_list)
-        if total_points == 0:
-            raise ValueError(f"沒有有效數值。欄位：{value_col}，物種：{species_order}")
 
+    # --- 畫圖 ---
     fig, ax = plt.subplots(figsize=FIGSIZE, dpi=DPI)
     bp = ax.boxplot(data_list, tick_labels=species_order, patch_artist=True, widths=0.55,
                     showfliers=False, medianprops=dict(color="black", linewidth=2.4),
@@ -605,7 +653,8 @@ def plot_b01_calibration_boxplot(dfs, params):
     return fig
 
 register("B-01", "檢量盒鬚圖（線性/回收率/RSD）", "儀器QC",
-        "依物種分組的盒鬚圖，支援兩種格式：1) 單sheet含物種欄位 2) 每個sheet=一個物種", plot_b01_calibration_boxplot, needs_files=1)
+        "五物種盒鬚圖比較，自動讀取所有工作表（每個sheet=一個物種），或單sheet含物種欄位", plot_b01_calibration_boxplot, needs_files=1)
+
 
 
 # --- B-02: SIFT-MS 離子源強度圖 ---
