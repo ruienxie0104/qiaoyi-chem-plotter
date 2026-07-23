@@ -437,12 +437,17 @@ register("A-09", "七測項統一版趨勢圖", "空氣品質", "CO/NMHC/O3/NO/N
 
 # --- B-01: 檢量盒鬚圖 ---
 def plot_b01_calibration_boxplot(dfs, params):
-    """檢量盒鬚圖（線性R²/回收率/%RSD）"""
+    """檢量盒鬚圖（線性R²/回收率/%RSD）
+    支援兩種 Excel 格式：
+    1. 單 sheet 含物種欄位（物種/Species/Compound）
+    2. 多 sheet，每個 sheet 名稱 = 物種名，欄位含理論濃度/真實濃度/RSD/回收率等
+    """
     FIGSIZE = (12, 7)
     DPI = 300
     LABEL_FS = 24
     TICK_FS = 20
-    COLORS = ["#1D4E89", "#4F81BD", "#6C8EBF", "#9DC3E6", "#B7C9E2"]
+    COLORS = ["#1D4E89", "#4F81BD", "#6C8EBF", "#9DC3E6", "#B7C9E2",
+              "#A8C8E8", "#7BAFD4", "#5B8FB9", "#3A6EA5", "#2E5A88"]
 
     matplotlib.rcParams["font.family"] = ["Microsoft JhengHei", "Arial", "Arial Unicode MS"]
     matplotlib.rcParams["axes.unicode_minus"] = False
@@ -458,7 +463,7 @@ def plot_b01_calibration_boxplot(dfs, params):
 
     # 自動判斷圖類型
     sheet_name = params.get("sheet_name", "")
-    plot_type = params.get("plot_type", "")  # 可從 UI 下拉選單指定
+    plot_type = params.get("plot_type", "")
     if not plot_type:
         if "線性" in sheet_name:
             plot_type = "線性"
@@ -467,7 +472,6 @@ def plot_b01_calibration_boxplot(dfs, params):
         elif "RSD" in sheet_name or "rsd" in sheet_name:
             plot_type = "%RSD"
         else:
-            # 嘗試從欄位判斷（更寬鬆的匹配）
             cols_norm = [_norm_colname(str(c)) for c in df.columns]
             if any("linearity" in c or "r2" in c or "r²" in c.lower() for c in cols_norm):
                 plot_type = "線性"
@@ -475,62 +479,104 @@ def plot_b01_calibration_boxplot(dfs, params):
                 plot_type = "回收率"
             elif any("rsd" in c for c in cols_norm):
                 plot_type = "%RSD"
+            elif any("回收率" in c or "recovery" in c for c in cols_norm):
+                plot_type = "回收率"
 
     if plot_type is None:
         raise ValueError("無法判斷圖表類型，請在參數中選擇圖表類型")
 
     setting = PLOT_SETTINGS[plot_type]
 
-    # 找物種欄位
+    # --- 判斷資料格式 ---
     possible_cols = ["物種", "Species", "species", "Compound", "compound", "化合物"]
     species_col = None
     for col in possible_cols:
         if col in df.columns:
             species_col = col
             break
-    if species_col is None:
-        raise ValueError("找不到物種欄位")
 
-    if plot_type == "線性":
-        value_col = "Linearity"
-        if value_col not in df.columns:
-            candidates = [c for c in df.columns if "line" in str(c).lower() or "r2" in str(c).lower() or "r²" in str(c).lower()]
-            if candidates:
-                value_col = candidates[0]
-            else:
-                raise ValueError("找不到 Linearity 欄位")
-        df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
-        df = df.dropna(subset=[species_col, value_col])
-        species_order = df[species_col].drop_duplicates().tolist()
-        data_list = [df.loc[df[species_col] == sp, value_col].dropna() for sp in species_order]
+    if species_col is not None:
+        # --- 格式 1：單 sheet 含物種欄位 ---
+        if plot_type == "線性":
+            value_col = "Linearity"
+            if value_col not in df.columns:
+                candidates = [c for c in df.columns if "line" in str(c).lower() or "r2" in str(c).lower() or "r²" in str(c).lower()]
+                if candidates:
+                    value_col = candidates[0]
+                else:
+                    raise ValueError("找不到 Linearity 欄位")
+            df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
+            df = df.dropna(subset=[species_col, value_col])
+            species_order = df[species_col].drop_duplicates().tolist()
+            data_list = [df.loc[df[species_col] == sp, value_col].dropna() for sp in species_order]
+        else:
+            conc_cols = []
+            for target in ["10 ppb", "15 ppb", "20 ppb", "25 ppb", "30 ppb"]:
+                tn = _norm_colname(target)
+                for c in df.columns:
+                    if _norm_colname(c) == tn:
+                        conc_cols.append(c)
+                        break
+            if not conc_cols:
+                conc_cols = [c for c in df.columns if "ppb" in str(c).lower()]
+                conc_cols = sorted(conc_cols)
+            if not conc_cols:
+                raise ValueError(f"找不到濃度欄位（10-30 ppb）。現有欄位：{list(df.columns)}")
+            species_order = df[species_col].drop_duplicates().tolist()
+            data_list = []
+            for sp in species_order:
+                sub_df = df[df[species_col] == sp]
+                values = []
+                for col in conc_cols:
+                    vals = pd.to_numeric(sub_df[col], errors="coerce").dropna()
+                    values.extend(vals.tolist())
+                data_list.append(values)
+            total_points = sum(len(d) for d in data_list)
+            if total_points == 0:
+                raise ValueError(f"所有物種都沒有有效數值。濃度欄位：{conc_cols}，物種：{species_order}")
     else:
-        # 回收率/%RSD：找 10-30 ppb 濃度欄位（模糊匹配）
-        conc_cols = []
-        for target in ["10 ppb", "15 ppb", "20 ppb", "25 ppb", "30 ppb"]:
-            tn = _norm_colname(target)
+        # --- 格式 2：多 sheet，每個 sheet = 一個物種 ---
+        if sheet_name:
+            species_name = sheet_name.split()[0]
+        else:
+            species_name = "Unknown"
+
+        if plot_type == "回收率":
+            value_col = None
             for c in df.columns:
-                if _norm_colname(c) == tn:
-                    conc_cols.append(c)
+                cn = _norm_colname(c)
+                if "回收率" in str(c) or "recovery" in cn:
+                    value_col = c
                     break
-        if not conc_cols:
-            # 更寬鬆：找任何含 ppb 的欄位
-            conc_cols = [c for c in df.columns if "ppb" in str(c).lower()]
-            conc_cols = sorted(conc_cols)
-        if not conc_cols:
-            raise ValueError(f"找不到濃度欄位（10-30 ppb）。現有欄位：{list(df.columns)}")
-        species_order = df[species_col].drop_duplicates().tolist()
-        data_list = []
-        for sp in species_order:
-            sub_df = df[df[species_col] == sp]
-            values = []
-            for col in conc_cols:
-                vals = pd.to_numeric(sub_df[col], errors="coerce").dropna()
-                values.extend(vals.tolist())
-            data_list.append(values)
-        # 檢查是否有抓到資料
+            if value_col is None:
+                raise ValueError(f"找不到回收率欄位。現有欄位：{list(df.columns)}")
+        elif plot_type == "%RSD":
+            value_col = None
+            for c in df.columns:
+                cn = _norm_colname(c)
+                if "rsd" in cn:
+                    value_col = c
+                    break
+            if value_col is None:
+                raise ValueError(f"找不到 RSD 欄位。現有欄位：{list(df.columns)}")
+        elif plot_type == "線性":
+            value_col = None
+            for c in df.columns:
+                cn = _norm_colname(c)
+                if "linearity" in cn or "r2" in cn or "r²" in cn:
+                    value_col = c
+                    break
+            if value_col is None:
+                raise ValueError(f"找不到 Linearity/R² 欄位。現有欄位：{list(df.columns)}")
+        else:
+            raise ValueError("無法判斷圖表類型，且找不到物種欄位。請選擇圖表類型或確認資料格式。")
+
+        df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
+        data_list = [df[value_col].dropna().tolist()]
+        species_order = [species_name]
         total_points = sum(len(d) for d in data_list)
         if total_points == 0:
-            raise ValueError(f"所有物種都沒有有效數值。濃度欄位：{conc_cols}，物種：{species_order}")
+            raise ValueError(f"沒有有效數值。欄位：{value_col}，物種：{species_order}")
 
     fig, ax = plt.subplots(figsize=FIGSIZE, dpi=DPI)
     bp = ax.boxplot(data_list, tick_labels=species_order, patch_artist=True, widths=0.55,
@@ -559,7 +605,8 @@ def plot_b01_calibration_boxplot(dfs, params):
     return fig
 
 register("B-01", "檢量盒鬚圖（線性/回收率/RSD）", "儀器QC",
-        "依物種分組的盒鬚圖，自動判斷線性R²/回收率/%RSD，需要單一Excel檔（含物種欄位）", plot_b01_calibration_boxplot, needs_files=1)
+        "依物種分組的盒鬚圖，支援兩種格式：1) 單sheet含物種欄位 2) 每個sheet=一個物種", plot_b01_calibration_boxplot, needs_files=1)
+
 
 # --- B-02: SIFT-MS 離子源強度圖 ---
 def plot_b02_ion_source(dfs, params):
