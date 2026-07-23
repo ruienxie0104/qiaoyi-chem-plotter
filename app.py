@@ -204,6 +204,18 @@ for tab, cat in zip(tabs, cat_names):
                         }
                         params["plot_type"] = type_map.get(selected_type, "")
                         st.info("📋 B-01 會自動讀取所有工作表，每個 sheet 視為一個物種")
+                        y_max_b01 = st.number_input(
+                            "Y軸上限（0=預設）", value=0.0, step=0.1,
+                            key=f"ymax_b01_{key_prefix}"
+                        )
+                        if y_max_b01 > 0:
+                            params["y_max"] = y_max_b01
+                        y_tick_b01 = st.number_input(
+                            "Y軸刻度間距（0=預設）", value=0.0, step=0.1,
+                            key=f"ytick_b01_{key_prefix}"
+                        )
+                        if y_tick_b01 > 0:
+                            params["y_tick"] = y_tick_b01
 
                 # --- 生成按鈕 ---
                 btn_label = "📥 合併並篩選" if plot_id == "B-08" else "🎨 生成圖表"
