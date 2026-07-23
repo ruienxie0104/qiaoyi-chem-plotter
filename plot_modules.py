@@ -623,9 +623,13 @@ def plot_b01_calibration_boxplot(dfs, params):
 
     # Y 軸控制
     y_max_custom = params.get("y_max", 0)
+    y_min_custom = params.get("y_min", 0)
     y_tick_custom = params.get("y_tick", 0)
     if y_max_custom and y_max_custom > 0:
-        ax.set_ylim(0, y_max_custom)
+        y_lo = y_min_custom if y_min_custom != 0 else 0
+        ax.set_ylim(y_lo, y_max_custom)
+    elif y_min_custom != 0:
+        ax.set_ylim(y_min_custom, setting["ylim"][1])
     else:
         ax.set_ylim(setting["ylim"])
 

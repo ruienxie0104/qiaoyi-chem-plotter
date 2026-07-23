@@ -210,6 +210,12 @@ for tab, cat in zip(tabs, cat_names):
                         )
                         if y_max_b01 > 0:
                             params["y_max"] = y_max_b01
+                        y_min_b01 = st.number_input(
+                            "Y軸下限（0=預設）", value=0.0, step=0.1,
+                            key=f"ymin_b01_{key_prefix}"
+                        )
+                        if y_min_b01 != 0:
+                            params["y_min"] = y_min_b01
                         y_tick_b01 = st.number_input(
                             "Y軸刻度間距（0=預設）", value=0.0, step=0.1,
                             key=f"ytick_b01_{key_prefix}"
