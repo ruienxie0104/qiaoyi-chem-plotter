@@ -273,11 +273,11 @@ def _plot_hourly_trend(dfs, params, value_col, ylabel, y_max_fixed, y_tick_step,
 
     return fig
 
-# --- A-01: NMHC 逐時濃度圖 ---
+# --- A-01: NMHC 逐時濃度圖（乾淨版：季節配色、僅月份縮寫 X 軸）---
 def plot_a01_nmhc(dfs, params):
-    return _plot_hourly_trend(dfs, params, "NMHC", "NMHC (ppmC)", 1.2, 0.2, 1.0, "Hourly NMHC Concentration")
+    return _plot_clean_seasonal(dfs, params, "NMHC", "NMHC (ppmC)", 1.0, 0.2, month_fmt="single")
 
-register("A-01", "NMHC 逐時濃度圖", "空氣品質", "NMHC 小時值趨勢圖，含月均值、季節配色、月最大值標注", plot_a01_nmhc)
+register("A-01", "NMHC 逐時濃度圖", "空氣品質", "NMHC 小時值趨勢圖（季節配色、X 軸僅月份縮寫＋年份）", plot_a01_nmhc)
 
 # --- A-02: CO 逐時濃度圖（全範圍）---
 def plot_a02_co_full(dfs, params):
@@ -321,16 +321,14 @@ def plot_a08_no(dfs, params):
 
 register("A-08", "NO 逐時濃度圖", "空氣品質", "NO 小時值趨勢圖", plot_a08_no)
 
-# --- A-09: 七測項統一版趨勢圖 ---
-def plot_a09_unified(dfs, params):
-    """統一版趨勢圖 — 使用者選擇物種"""
+def _plot_clean_seasonal(dfs, params, value_col, ylabel, default_ymax, default_ytick,
+                        default_start="2025-05-01", default_end="2026-05-31 23:59:59",
+                        month_fmt="short"):
+    """乾淨版季節配色趨勢圖：無月均值/最大值標註，X 軸僅月份縮寫＋開始年份"""
     TIME_COL = "時間"
     SCALE = params.get("scale", 1.8)
-    start_date = pd.to_datetime(params.get("start_date", "2025-05-01"))
-    end_date = pd.to_datetime(params.get("end_date", "2026-05-31 23:59:59"))
-
-    # 使用者選擇的物種
-    selected_species = params.get("species", "CO")
+    start_date = pd.to_datetime(params.get("start_date", default_start))
+    end_date = pd.to_datetime(params.get("end_date", default_end))
 
     matplotlib.rcParams["font.family"] = ["Microsoft JhengHei", "DejaVu Sans", "Arial Unicode MS"]
     matplotlib.rcParams["axes.unicode_minus"] = False
@@ -340,21 +338,6 @@ def plot_a09_unified(dfs, params):
     LEGEND_FS = 18
     matplotlib.rcParams["font.size"] = BASE
 
-    PLOT_ITEMS = {
-        "CO": ("CO (ppmv)", 3.0, 1.0),
-        "NMHC": ("NMHC (ppmC)", 1.0, 0.2),
-        "O3": (r"$O_{3}$ (ppbv)", 120, 30),
-        "NO": ("NO (ppbv)", 25, 5),
-        "NO2": (r"$NO_{2}$ (ppbv)", 20, 5),
-        "PM2.5": (r"$PM_{2.5}$ (μg/m³)", 50, 10),
-        "PM10": (r"$PM_{10}$ (μg/m³)", 150, 30),
-    }
-
-    if selected_species not in PLOT_ITEMS:
-        raise ValueError(f"不支援的物種：{selected_species}。可選：{list(PLOT_ITEMS.keys())}")
-
-    ylabel, default_ymax, default_ytick = PLOT_ITEMS[selected_species]
-
     # 使用者自訂 Y 軸
     ymax = params.get("y_max", 0)
     if ymax and ymax > 0:
@@ -363,10 +346,14 @@ def plot_a09_unified(dfs, params):
     if ytick and ytick > 0:
         default_ytick = ytick
 
-    MONTH_LABEL = {1:"J",2:"F",3:"M",4:"A",5:"M",6:"J",7:"J",8:"A",9:"S",10:"O",11:"N",12:"D"}
+    # month_fmt: "short" = Jan/Feb/…；"single" = J/F/M/…
+    if month_fmt == "short":
+        MONTH_LABEL = {1:"Jan",2:"Feb",3:"Mar",4:"Apr",5:"May",6:"Jun",
+                       7:"Jul",8:"Aug",9:"Sep",10:"Oct",11:"Nov",12:"Dec"}
+    else:
+        MONTH_LABEL = {1:"J",2:"F",3:"M",4:"A",5:"M",6:"J",7:"J",8:"A",9:"S",10:"O",11:"N",12:"D"}
     season_colors = {"春": "#4F81BD", "夏": "#FF7F0E", "秋": "#2CA02C", "冬": "#D62728"}
 
-    value_col = selected_species
     df = read_excel_dfs(dfs, TIME_COL, value_col)
     df_period = df[(df[TIME_COL] >= start_date) & (df[TIME_COL] <= end_date)].copy()
     df_period.loc[df_period[value_col] <= 0, value_col] = np.nan
@@ -376,13 +363,17 @@ def plot_a09_unified(dfs, params):
     month_start_idx = []
     month_labels = []
     first_year = None
-    for (year, month), group in df_period.groupby([df_period[TIME_COL].dt.year, df_period[TIME_COL].dt.month]):
-        month_start_idx.append(group[TIME_COL].iloc[0])
+    for (year, month), group in sorted(
+        df_period.groupby([df_period[TIME_COL].dt.year, df_period[TIME_COL].dt.month]),
+        key=lambda kv: kv[0]
+    ):
+        month_start_idx.append(group[TIME_COL].min())
         if first_year != year:
-            month_labels.append(f"{MONTH_LABEL[month]}\n{year}")
+            # 每段的第一個月才附上「開始年份」
+            month_labels.append(f"{MONTH_LABEL[int(month)]}\n{year}")
             first_year = year
         else:
-            month_labels.append(MONTH_LABEL[month])
+            month_labels.append(MONTH_LABEL[int(month)])
 
     fig, ax = plt.subplots(figsize=(16, 9), dpi=300)
     fig.subplots_adjust(left=0.08, right=0.98, bottom=0.22, top=0.78)
@@ -420,14 +411,37 @@ def plot_a09_unified(dfs, params):
     ax.set_xlabel("Date", fontsize=LABEL_FS)
     ax.set_ylabel(ylabel, fontsize=LABEL_FS, fontweight="bold")
     ax.set_xticks(month_start_idx)
-    ax.set_xticklabels(month_labels, fontsize=TICK_FS, linespacing=1.5)
+    ax.set_xticklabels(month_labels, fontsize=TICK_FS, linespacing=1.5, fontweight="bold")
     ax.tick_params(axis="x", pad=10)
+    plt.setp(ax.get_xticklabels(), rotation=0, ha="center")
     ax.tick_params(axis="y", labelsize=TICK_FS)
     ax.grid(color="gray", alpha=0.25)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
     return fig
+
+
+# --- A-09: 七測項統一版趨勢圖 ---
+def plot_a09_unified(dfs, params):
+    """統一版趨勢圖 — 使用者選擇物種"""
+    PLOT_ITEMS = {
+        "CO": ("CO (ppmv)", 3.0, 1.0),
+        "NMHC": ("NMHC (ppmC)", 1.0, 0.2),
+        "O3": (r"$O_{3}$ (ppbv)", 120, 30),
+        "NO": ("NO (ppbv)", 25, 5),
+        "NO2": (r"$NO_{2}$ (ppbv)", 20, 5),
+        "PM2.5": (r"$PM_{2.5}$ (μg/m³)", 50, 10),
+        "PM10": (r"$PM_{10}$ (μg/m³)", 150, 30),
+    }
+
+    selected_species = params.get("species", "CO")
+    if selected_species not in PLOT_ITEMS:
+        raise ValueError(f"不支援的物種：{selected_species}。可選：{list(PLOT_ITEMS.keys())}")
+
+    ylabel, default_ymax, default_ytick = PLOT_ITEMS[selected_species]
+    return _plot_clean_seasonal(dfs, params, selected_species, ylabel, default_ymax, default_ytick,
+                                month_fmt="single")
 
 register("A-09", "七測項統一版趨勢圖", "空氣品質", "CO/NMHC/O3/NO/NO2/PM2.5/PM10 統一版趨勢圖（只有季節配色線）", plot_a09_unified)
 
